@@ -1,8 +1,10 @@
 ---
 title: "Product Brief: Fibonacci Career Map (FCM)"
 status: "draft"
+version: "1.1"
 created: "2026-04-18"
 updated: "2026-04-18"
+revision_note: "v1.1 targeted revision: strengthens 1:1 / development-conversation framing, makes promotion a human decision not a computation, clarifies enterprise-safe visibility defaults and map anonymization, elevates HR/People to an operational governance persona, strengthens the Fibonacci rationale, and introduces organizational rollout-mode safeguards."
 inputs:
   - "docs/MVP/mvp_documentation/MVP of FCM APP.pdf"
   - "docs/MVP/images/ChatGPT Image Apr 18, 2026, 10_45_09 AM.png"
@@ -56,7 +58,9 @@ The 3D map is not a dashboard widget. It is the product's primary home screen an
 
 From this single interactive surface, all core workflows begin. Managers explore team readiness. Employees locate themselves on the map and understand their path. HR views organizational distribution and bench strength. The system makes the invisible visible: who is close to promotion, who is stalled, where the pipeline is thin, and what the next 6 months of career movement looks like across the organization.
 
-Behind the 3D map, FCM runs a structured evidence and scoring engine. Employees submit evidence against configurable requirements — courses, certifications, project deliveries, architectural decisions, mentoring records. Managers validate evidence with a reason. Validated evidence generates weighted points. Points accumulate against a level band. The system calculates two distinct outputs: a **Score** (total validated points) and a **Readiness percentage** (which also requires completion of all mandatory requirements). It also calculates an **ETA** — time to next level based on recent validated progression velocity — paired always with an explicit **Confidence indicator**.
+Behind the 3D map, FCM runs a structured evidence and scoring engine. Employees submit evidence against configurable requirements — courses, certifications, project deliveries, architectural decisions, mentoring records. Managers validate evidence with a reason. Validated evidence generates weighted points. Points accumulate against a level band. The system calculates **three distinct outputs** — **Score Progress** (points in the current level band), **Readiness %** (an informational display that combines score progress and mandatory completion), and **Promotion Eligibility** (the binary system-level precondition that *opens the promotion conversation*). It also calculates an **ETA** — time to next level based on recent validated progression velocity — paired always with an explicit **Confidence indicator**.
+
+**Promotion Eligibility is a precondition, not a promotion decision.** The system computes whether the objective conditions for considering a promotion are met. The actual promotion still requires a manager's explicit recommendation with a performance narrative and the organization's configured approval workflow (which may include calibration and HR counter-sign). FCM surfaces the data; the organization retains judgment.
 
 Administrators configure the system through a dedicated settings module: career tracks, level names, score bands, layers, requirements, weights, promotion rules, and approval workflows. The product ships seeded with defaults derived from the CDF Technology Levels model, covering Software Engineering, Architecture, and Management tracks. These defaults are fully editable — the CDF structure is a starting point, not a constraint.
 
@@ -80,6 +84,12 @@ FCM does not impose a career model. It ships with sensible CDF-derived defaults 
 
 **5. Evidence-based and auditable by design.**
 Every progression signal in FCM is tied to validated evidence. Every validation decision is recorded with a reason. Every score change is traceable. Organizations can reconstruct any promotion decision from the audit record. This is a first-class enterprise requirement, not an afterthought.
+
+**6. Promotion is a decision, not a computation.**
+Evidence and eligibility are necessary; they are never sufficient. The system never auto-promotes. A manager must make an explicit recommendation with a performance narrative that speaks to the employee's *actual performance at the target level*, not just a checklist of accumulated evidence. The product is deliberately designed so that mechanical checklist completion cannot bypass managerial judgment, HR calibration, or the configured approval workflow.
+
+**7. Fibonacci is structure, not decoration.**
+The Fibonacci sequence is used in three specific and defensible ways. It is the spatial grammar of the 3D spiral because exponential visual bands match the exponential scope increase between career levels — a senior engineer's impact is not linearly larger than a junior's, and the map encodes that. It is the default weighting scale because rare, high-impact contributions are empirically worth disproportionately more than routine activity, and Fibonacci weights capture that without requiring an organization to invent a scale. And it is the forecasting rhythm because a 90-day velocity window balances signal freshness with statistical stability for evidence events that, at senior levels, are infrequent but weighty. Fibonacci structures the system; organizations govern the system; managers decide the outcomes. The math never replaces the judgment.
 
 ---
 
@@ -109,25 +119,30 @@ Engineering managers, team leads, and technical directors responsible for the pr
 - See their team distributed across the 3D career map
 - Identify who is promotion-ready, who is blocked, and who is at retention risk
 - Review and validate evidence from their reports with a reason trail
-- Initiate and document promotion recommendations
-- Use the system as the factual basis for development 1:1s
+- **Capture private development notes on each report** — observations, coaching topics, 1:1 agenda items — that travel with the employee's context but are not part of the scoring engine
+- **Optionally share specific notes with the employee** as structured development actions, converting private coaching into a visible joint development plan
+- Initiate promotion recommendations with a **performance narrative** — an explicit written judgment that the employee is performing at the target level, not merely that they have accumulated the evidence
+- Use the system as the factual basis for development 1:1s and for defensible promotion conversations
 
-**What success looks like:** A manager can prepare for any development conversation in under 2 minutes using the 3D map and the employee detail panel. Promotion decisions are defensible.
+**What success looks like:** A manager can prepare for any 1:1 in under 2 minutes using the 3D map, the employee detail panel, and the development notes thread. Promotion decisions are defensible because the manager's written recommendation sits alongside the evidence, not in place of it.
 
 ---
 
-### Admin / HR
+### Admin / HR (People & Governance)
 
-HR business partners, people operations, and organization-level administrators responsible for configuring the career framework, enforcing standards, and ensuring audit compliance.
+HR business partners, people operations, and organization-level administrators. This persona is **operationally active**, not purely administrative. HR is the governance layer that keeps the system fair at organizational scale — they calibrate, oversee, adjudicate contested decisions, and own the rollout posture.
 
 **What they need from FCM:**
 - Configure and maintain career tracks, levels, layers, requirements, weights, and rules
-- Define promotion workflow (single sign-off, dual approval, HR review gate)
-- View organization-level career health and distribution
-- Access audit logs and progression history for any individual or event
+- Define promotion workflow (single sign-off, dual approval, HR review gate) per organization or per level
+- **Operate the calibration layer:** review the organization-wide pipeline of eligible employees, flag individual promotions for calibration review before final approval, and hold explicit calibration sessions backed by the system's data
+- **Own the rollout posture:** when FCM is first activated, decide whether the organization is in a Calibration rollout mode (eligibility is informational, no promotion actions fire) or in Active mode (promotion workflow operates normally)
+- **Oversee contested decisions:** reconstruct any promotion or evidence approval from the immutable audit log, including the manager's recommendation narrative
+- View organization-level career health, distribution, bench strength, and manager engagement metrics
 - Export data for workforce planning and HR system integration readiness
+- Monitor manager approval patterns for fairness and consistency signals
 
-**What success looks like:** HR can configure the system once from the CDF seed, maintain it with low overhead, and produce a complete audit record for any challenged promotion decision.
+**What success looks like:** HR activates FCM without triggering a mass-promotion event on day one, runs structured calibration conversations using system data, can reconstruct any challenged decision end-to-end within minutes, and treats the system as their governance instrument — not their reporting tool.
 
 ---
 
@@ -147,6 +162,8 @@ The spiral structure maps career levels spatially: the innermost bands represent
 - "Selectable points" mode for precise node targeting
 
 The left panel provides filter controls. The top navigation bar provides access to Dashboard, Career Map, Analytics, and Settings views.
+
+**Enterprise-safe default visibility.** The 3D map is organization-wide by nature, but what each viewer can identify about other people is not. By default, peer nodes shown to an employee are **anonymized** — the employee sees the organization's spatial structure and their own node highlighted, but cannot identify colleagues by name or inspect their score, readiness, or evidence. Managers see their direct reports as clickable and fully detailed; peer-team nodes are visible for organizational context only. HR / Admin sees the full map. Organizations with transparent cultures can opt up to broader peer visibility, but the default is conservative by design so the product does not inadvertently create unhealthy comparison pressure at launch.
 
 ### The Employee Detail Panel
 
@@ -206,8 +223,9 @@ FCM is an organization-configured system. The CDF seed provides a working starti
 | Layers | Names (default: Capability, Delivery, Influence), add or rename |
 | Requirements | Type (course, certification, project, delivery, mentoring, etc.), weight (Fibonacci or numeric), mandatory flag, evidence type required, expiry period |
 | Promotion Rules | Minimum score, mandatory requirement gate, manager approval required, HR counter-sign option, minimum time at level, active blocker check |
-| Visibility Rules | What information employees can see about peers (score, readiness, ETA) |
-| Approval Workflow | Single manager sign-off, dual manager sign-off, HR review gate |
+| Visibility Rules | What information employees can see about peers (identity on map, score, readiness, ETA); default conservative with peer anonymization on the 3D map |
+| Approval Workflow | Single manager sign-off, dual manager sign-off, HR review gate — optionally per-level |
+| Rollout / Promotion Mode | Whether the organization is in **Calibration** rollout mode (eligibility informational only, no promotion actions fire) or **Active** mode (promotions operate normally). Transition requires explicit HR activation. |
 
 ### What Is Not Configurable
 
@@ -499,6 +517,9 @@ These reflect the intended product direction established in source materials. Th
 | Evidence quality gaming (thin evidence submitted to accumulate points) | Medium — score integrity risk | Manager validation is the gate; evidence with attached files or verifiable links is more defensible |
 | Enterprise audit and compliance expectations exceed MVP capabilities | Low-Medium — deal-blocker risk | Immutable audit log and score snapshots are in MVP scope; export and advanced compliance tooling are V2 |
 | Async recalculation job failure leaves employees with stale scores | Medium — trust issue | Jobs must be idempotent, retryable, and surface processing status in the UI |
+| **Bootstrap promotion surge** — on first activation, historical evidence may make many employees appear eligible on day one, triggering organizational chaos if the system auto-signals "promotion ready" | High — organizational trust and credibility risk | **Calibration rollout mode** is the default on new-org activation. Eligibility is computed and shown to HR as a *calibration queue*, but promotion actions are gated behind explicit HR activation. HR runs calibration sessions, transitions the organization to Active mode when the pipeline is understood, and staggers initial promotion decisions as organizational constraints allow. The system reveals reality; HR decides how to act on it. |
+| Promotion reduced to mechanical checklist completion (eligibility ≠ actual performance) | High — fairness and quality risk | Promotion Eligibility is declared a *precondition*, not a decision. Manager must submit a performance narrative recommending the promotion; calibration and HR review override checklist optimism. |
+| Peer visibility creates unhealthy comparison pressure | Medium — culture risk | Conservative default: peer nodes on the 3D map are anonymized for employees; score / ETA / evidence never exposed to peers by default. Organizations opt in to broader visibility as culture allows. |
 
 ---
 
@@ -543,11 +564,14 @@ In the 24–36 month horizon:
 
 1. **Product identity:** FCM is a career progression intelligence platform. Not a visualization app. Not a Fibonacci novelty.
 2. **3D map is the primary home screen and navigation surface.** Employee exploration happens via contextual panels within the 3D environment. Full-page views (Analytics, Settings) are deliberate secondary modes.
-3. **Score and Readiness are distinct, separately displayed metrics.** This is the most important business rule.
+3. **Score Progress, Readiness %, and Promotion Eligibility are three distinct outputs.** This is the most important business rule.
 4. **ETA and Confidence are always paired outputs.** ETA without confidence is not acceptable.
 5. **Auditability is non-negotiable.** All mutating events are logged immutably.
 6. **CDF seed is an editable default, not the product model.** The product is configurable; CDF gives organizations a zero-friction start.
 7. **Recalculation is deterministic and asynchronous.** Same inputs, same outputs. Background processing, not blocking.
+8. **Promotion is a human decision mediated by the system, not automated by it.** Promotion Eligibility opens the conversation; a manager's written recommendation and the configured approval workflow close it. The system never auto-promotes.
+9. **Visibility is enterprise-safe by default.** Peer identification on the 3D map is anonymized for employees on new organizations; organizations opt up to broader visibility, never the other way around.
+10. **Rollout safety is the default.** New organizations activate in Calibration mode; promotions are gated until HR explicitly transitions the organization to Active.
 
 ### Ambiguities Resolved Conservatively
 

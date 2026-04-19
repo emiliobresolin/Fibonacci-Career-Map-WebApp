@@ -79,6 +79,9 @@ It translates the validated PRD (v1.0) into an implementable system design. It i
 6. **Append-only audit, outbox-delivered.** Audit events are published via the transactional outbox pattern and written to an immutable partitioned log.
 7. **Evidence bypasses the API for bytes.** Pre-signed direct-to-S3 upload/download; API holds only metadata and access decisions.
 8. **Observability is not optional.** Correlation IDs, structured logs, Prometheus metrics, OpenTelemetry traces from MVP.
+9. **Promotion is a human decision mediated by the system, not automated by it.** The system computes Promotion Eligibility, blocks ineligible actions, and captures the decision rigorously (Manager Recommendation, Performance Narrative, configured approval workflow, Calibration Flag). The system never advances an employee's level from a computed signal alone; a level write is always preceded by a recorded human decision chain.
+10. **Organizational posture is a first-class configuration axis.** Rollout Mode (`CALIBRATION` / `ACTIVE`) gates the promotion surface at org level and defaults to `CALIBRATION` on new organizations; transition captures an immutable Bootstrap Eligibility Snapshot. Scoring and recalculation are not affected by the mode — only promotion-initiation surface area is.
+11. **Enterprise-safe visibility by default.** Map data is shaped server-side under the visibility rule. The default posture anonymizes non-visible peer nodes while preserving organizational shape (track/level/score band) so the map works without leaking identity.
 
 ### 2.3 Non-Goals (Architectural)
 
@@ -237,12 +240,13 @@ Each module is a self-contained NestJS module with: entities (TypeORM/Prisma mod
 | Module | Owns | Exposes |
 |---|---|---|
 | **identity** | User, Organization, RoleAssignment, Session | `UserService`, `SessionService`, OIDC controllers |
-| **organization** | Organization bootstrap, CDF seeding, member roster | `OrganizationService`, `SeedingService` |
+| **organization** | Organization bootstrap, CDF seeding, member roster, Rollout Mode state (`CALIBRATION`/`ACTIVE`), Bootstrap Eligibility Snapshot capture | `OrganizationService`, `SeedingService`, `RolloutModeService`, `BootstrapSnapshotService` |
 | **configuration** | CareerTrack, Level, Layer, Requirement, PromotionRule, VisibilityRule, ApprovalWorkflow | `ConfigurationService`; emits `ConfigurationChanged` domain events |
 | **evidence** | Evidence entity, lifecycle state machine (DRAFT → PENDING_APPROVAL → APPROVED/REJECTED/EXPIRED) | `EvidenceService`; emits `EvidenceApproved`, `EvidenceRejected`, `EvidenceExpired` |
 | **scoring** | Pure scoring/readiness/eligibility calculation, ScoreSnapshot persistence | `ScoringService` (pure, deterministic); `SnapshotRepository` |
 | **forecasting** | ETA and Confidence calculation | `ForecastingService` (pure, deterministic) |
-| **promotion** | PromotionRecord, approval chain execution, track transfer | `PromotionService`; enforces server-side Promotion Eligibility check (FR-7.4) |
+| **promotion** | PromotionRecord, PromotionRecommendation, PerformanceNarrative, CalibrationFlag, approval chain execution, track transfer | `PromotionService`, `RecommendationService`, `CalibrationService`; enforces server-side Promotion Eligibility check (FR-7.4), Rollout-Mode gate (FR-7.13), Calibration Hold gate (FR-7.12), and Performance Narrative min-length (FR-7.10) |
+| **developmentnotes** | Manager-authored notes on direct reports with `PRIVATE` / `SHARED_WITH_EMPLOYEE` visibility state and irreversible share transition | `DevelopmentNotesService`; enforces RBAC visibility (FR-3.14); emits `DevelopmentNoteShared` for audit |
 | **audit** | AuditEvent append-only log, outbox consumer | `AuditService`; reads only — writes via outbox |
 | **notification** | In-app notifications | `NotificationService` |
 | **realtime** | WebSocket gateway, Redis pub/sub fanout, per-user/per-org rooms | `RealtimeGateway`, `PublishService` |
@@ -288,6 +292,10 @@ A single request/job executes a single DB transaction by default. The high-impac
 - **Evidence approval** (single txn): update Evidence state → write ApprovalRecord → insert outbox rows (audit + score-recalc job enqueue + notification). Commit.
 - **Promotion commit** (single txn): insert PromotionRecord → update Employee level → reset level-scoped score inputs → insert outbox rows (audit + notification + 3D refresh). Commit.
 - **Configuration change** (single txn): mutate configuration rows → insert outbox rows (audit + bulk-recalc fanout). Commit.
+- **Promotion Recommendation** (single txn): verify Eligibility = `ELIGIBLE`, Rollout Mode = `ACTIVE`, no active Calibration Hold, and Performance Narrative ≥200 chars → insert PromotionRecommendation with immutable Performance Narrative → advance approval-chain state → insert outbox rows (audit + notification + watchers). Commit. The Recommendation write is what opens the approval workflow; the level change happens only at Promotion commit after the chain is complete.
+- **Calibration Flag set/resolve** (single txn): insert CalibrationFlag row (state `OPEN` / `RESOLVED_RELEASE` / `RESOLVED_REJECT`) with HR actor and reason → if resolving, link to resolution note → insert outbox rows (audit + notification to manager + notification to employee if configured). Commit. The flag's presence is what gates any promotion approval API server-side (FR-7.12).
+- **Rollout Mode transition** (single txn): verify Admin actor + rationale ≥100 chars (on CALIBRATION→ACTIVE only) → update `organization.promotion_mode` → on CALIBRATION→ACTIVE, snapshot every employee's current Score / Readiness % / Promotion Eligibility / active CalibrationFlag into the immutable `bootstrap_eligibility_snapshot` table with a single `transition_id` → insert outbox rows (audit + org-wide banner event + manager notification fanout). Commit. Snapshot capture runs inside the same transaction as the mode change so that the "state at transition" claim is bit-exact.
+- **Development Note share** (single txn): verify actor is Manager or HR → transition note visibility from `PRIVATE` to `SHARED_WITH_EMPLOYEE` (irreversible) → insert outbox rows (audit + employee notification). Commit.
 
 The **outbox** pattern (§9.3) guarantees audit writes and job enqueues happen if-and-only-if the transaction commits.
 
@@ -308,7 +316,7 @@ The **outbox** pattern (§9.3) guarantees audit writes and job enqueues happen i
 
 | Table | Notes |
 |---|---|
-| `organizations` | tenant root; has `slug`, `name`, OIDC config, visibility rule setting, approval workflow |
+| `organizations` | tenant root; has `slug`, `name`, OIDC config, visibility rule setting, approval workflow, `promotion_mode` enum (`CALIBRATION` \| `ACTIVE`, default `CALIBRATION`), `promotion_mode_changed_at`, `promotion_mode_changed_by` |
 | `users` | authenticated identity; FK to `organizations` |
 | `role_assignments` | `(user_id, organization_id, role)` — unique constraint |
 | `career_tracks` | org-scoped; `display_order`; unique `(organization_id, slug)` |
@@ -326,6 +334,11 @@ The **outbox** pattern (§9.3) guarantees audit writes and job enqueues happen i
 | `audit_events` | **append-only** partitioned; organization_id; actor_id; event_type; entity_type; entity_id; before JSONB; after JSONB; reason; `occurred_at` |
 | `outbox_events` | transactional outbox; `published_at` nullable; picked up by relay |
 | `recalc_jobs` | idempotency registry: `(employee_id, triggering_event_id)` unique; status |
+| `promotion_recommendations` | FK to promotion_record_id + manager_id; `performance_narrative TEXT NOT NULL CHECK (char_length(performance_narrative) >= 200)`; `recommended_at`; append-only (no UPDATE/DELETE at DB role) |
+| `calibration_flags` | FK to employee_id + flagger_id (HR); state enum (`OPEN` \| `RESOLVED_RELEASE` \| `RESOLVED_REJECT`); open_reason TEXT NOT NULL CHECK (≥40 chars); resolution_note TEXT nullable; `opened_at`, `resolved_at`; partial unique index `(employee_id) WHERE state = 'OPEN'` (at most one open flag per employee) |
+| `development_notes` | FK to manager_id + employee_id; body TEXT; visibility enum (`PRIVATE` \| `SHARED_WITH_EMPLOYEE`); `created_at`, `shared_at` nullable; share transition is one-way (enforced by BEFORE UPDATE trigger rejecting reverse transitions) |
+| `bootstrap_eligibility_snapshots` | FK to organization_id + transition_id; one row per employee per transition; captures employee_id, level_id, score, readiness_pct, promotion_eligible, calibration_flag_open, occurred_at; **append-only**; partitioned by `RANGE (occurred_at)` quarterly |
+| `rollout_mode_transitions` | FK to organization_id + actor_id; from_mode, to_mode, rationale TEXT (CHECK ≥100 chars only when from_mode='CALIBRATION'); `transitioned_at`; append-only |
 
 ### 6.3 ScoreSnapshot Partitioning (resolves AO4 — part 1)
 
@@ -668,19 +681,32 @@ Environment parity: same container images, same IaC, same migrations, differing 
 - `GET /employees/:id/snapshot/latest`, `GET /employees/:id/snapshots`, `GET /employees/:id/score-breakdown`
 - `POST /requirements/:id/evidence/upload-slot`, `POST /requirements/:id/evidence/finalize`
 - `GET /evidence/:id`, `PATCH /evidence/:id/approve`, `PATCH /evidence/:id/reject`
-- `POST /employees/:id/promotions`, `PATCH /promotions/:id/approve`, `PATCH /promotions/:id/reject`
+- `POST /employees/:id/promotions` — creates a PromotionRecord; server-side verifies Eligibility + Rollout Mode = `ACTIVE` + no open Calibration Flag; body requires `performance_narrative` (≥200 chars)
+- `POST /promotions/:id/recommend` — Manager commits the Recommendation + Performance Narrative (append-only); opens the approval chain
+- `PATCH /promotions/:id/approve`, `PATCH /promotions/:id/reject` — approval-chain transitions; reject Calibration-Held and Calibration-Mode orgs with structured errors
+- `POST /employees/:id/calibration-flags` — HR flags an employee for calibration; body requires `reason` (≥40 chars); returns flag ID
+- `PATCH /calibration-flags/:id/resolve` — HR resolves with `RESOLVED_RELEASE` or `RESOLVED_REJECT` and optional resolution note
+- `GET /organizations/me/promotion-mode` — returns current Rollout Mode + last transition metadata
+- `PATCH /organizations/me/promotion-mode` — Admin-only; transitioning `CALIBRATION` → `ACTIVE` requires `rationale` (≥100 chars) and triggers synchronous Bootstrap Eligibility Snapshot capture inside the same transaction
+- `GET /organizations/me/bootstrap-snapshots`, `GET /organizations/me/bootstrap-snapshots/:transition_id` — HR access to immutable snapshot history
+- `GET/POST /employees/:id/development-notes`, `PATCH /development-notes/:id/share` — Manager-authored notes; share is one-way and audited
+- `GET /analytics/calibration-queue` — HR Calibration Queue feed (FR-10.5) listing Eligible + Calibration-Hold employees
+- `GET /analytics/manager-approval-patterns` — HR-scoped manager approval pattern report (FR-10.7)
 - `GET /audit-events`, `GET /audit-events/export`
 - `GET /map/projection` — returns spiral projection data for the current org configuration
-- `GET /map/employees` — returns server-filtered, server-shaped node data (respecting visibility/RBAC)
+- `GET /map/employees` — returns server-filtered, server-shaped node data (respecting visibility/RBAC + Rollout Mode + anonymization)
 - `GET /notifications`, `PATCH /notifications/:id/read`
 - `GET /analytics/*` scoped read-only endpoints
 
 ### 13.3 Map Data Contract (key 3D backing API)
 
 `GET /map/employees` returns:
-- `nodes[]`: `{ employee_id, track_id, level_id, band_position (0–1), score, readiness_pct, promotion_eligible, at_risk, anonymized }`
-- `anonymized=true` nodes strip name/photo and mark the node non-clickable per visibility rules.
-- Server shapes the response per viewer role — the client is **never** trusted to hide data it received.
+- `nodes[]`: `{ employee_id (nullable when anonymized), track_id, level_id, band_position (0–1), score (nullable), readiness_pct (nullable), promotion_eligible (nullable), eligibility_state ('ELIGIBLE' | 'NOT_ELIGIBLE' | 'CALIBRATION_HOLD' | 'PENDING_CALIBRATION'), at_risk (nullable), anonymized BOOLEAN }`
+- `eligibility_state` encodes the four orthogonal UI states: the binary eligibility (`ELIGIBLE` / `NOT_ELIGIBLE`), the HR-applied Calibration Hold override (`CALIBRATION_HOLD`), and the org-level Rollout-Mode override (`PENDING_CALIBRATION` — surfaced when `organization.promotion_mode = CALIBRATION`). Only one state is returned per node; the server applies the override hierarchy (Rollout Mode > Calibration Hold > Eligibility).
+- `anonymized=true` nodes: `employee_id` is replaced with an opaque per-render token (no stable employee reference); `score`, `readiness_pct`, `promotion_eligible`, and `at_risk` are all `null`; node is marked non-clickable; `track_id`, `level_id`, and `band_position` remain populated to preserve the spatial shape.
+- **Anonymization is enforced server-side** by a Map Projection authorization pass that runs after RBAC scoping: for each node the service decides `should_reveal(viewer, subject)` per the org's `VisibilityRule`, the viewer's role, and whether the subject is a direct report of the viewer. Nodes failing `should_reveal` are emitted in anonymized form — the client never receives identity payload for non-visible peers. The server is **never** trusted to send data it then asks the client to hide.
+- **Rollout Mode influence on visual payload**: when `promotion_mode = CALIBRATION`, all nodes receive `eligibility_state = 'PENDING_CALIBRATION'` for anyone who would otherwise compute as `ELIGIBLE` — the UI uses this to suppress the "promotion-ready" pulse and render the calibration label instead. Suppression is applied at the Map Data Contract boundary so no client variant needs to know the mode.
+- **Response headers**: `X-FCM-Rollout-Mode: CALIBRATION | ACTIVE` and `X-FCM-Visibility-Scope: OWN_ONLY | TEAM | ORG_SUMMARY | ORG_FULL` are emitted so the client can render the banner and state without a second round-trip.
 
 ### 13.4 Webhooks (Infrastructure-Ready, Not Wired in MVP)
 
@@ -763,6 +789,10 @@ All seven are resolved with concrete decisions.
 | AR-8 | Snapshot partition growth unbounded | Monthly partitioning + 12-month hot window + cold-tier archival job (scheduled weekly) |
 | AR-9 | Client-side 3D state memory creep on long sessions | Geometry caches bounded; OrbitControls/InstancedMesh disposed on route exit; Sentry memory breadcrumbs |
 | AR-10 | Latency between snapshot write and 3D reflection | Outbox relay p95 < 2s target; fallback polling keeps stale window bounded to 30s |
+| AR-11 | Bootstrap promotion surge at first activation creates org-wide "all eligible" signal, loss of trust, or accidental auto-promotion path | Organization `promotion_mode` defaults to `CALIBRATION` (see §6.2); all promotion-mutating API endpoints enforce the mode check server-side (see §5.4) and return structured errors when the org is in `CALIBRATION`; the Map Data Contract (§13.3) emits `eligibility_state = 'PENDING_CALIBRATION'` so the UI never displays a promotion-ready affordance org-wide; transition to `ACTIVE` requires an Admin action with rationale ≥100 chars and captures an immutable Bootstrap Eligibility Snapshot inside the same transaction — architectural atomicity guarantees the "state at transition" claim is defensible. |
+| AR-12 | Promotion Eligibility misinterpreted as promotion decision in client/API consumer code | Eligibility check in backend is necessary-not-sufficient: promotion `POST` endpoints additionally verify Rollout Mode, Calibration Hold absence, and Performance Narrative presence (≥200 chars) in a single transaction (see §5.4); `promotion_recommendations` table is append-only at the DB role level; integration tests assert the four orthogonal gate paths. |
+| AR-13 | Map server payload leaks identity for non-visible peers | Map Data Contract (§13.3) applies the authorization pass server-side after RBAC scoping; non-visible nodes emit only `{ track_id, level_id, band_position, anonymized: true }`; identity columns are NULL in the response; integration tests assert that a viewer with `OWN_ONLY` visibility never sees any `employee_id` other than their own in the map response. |
+| AR-14 | Calibration Flag race condition (two HR actors open flags simultaneously) | Partial unique index `(employee_id) WHERE state = 'OPEN'` on `calibration_flags` prevents concurrent open flags at the DB level; conflict returns a structured `409 CALIBRATION_FLAG_ALREADY_OPEN` to the losing request; flag resolution requires `state = OPEN` precondition. |
 
 ---
 
@@ -826,6 +856,11 @@ For the epics-and-stories workflow, the following architectural commitments must
 - [ ] Scoring engine (pure core + orchestrator + snapshots)
 - [ ] Forecasting engine (ETA + Confidence)
 - [ ] Promotion workflow (eligibility check, approval chain, track transfer)
+- [ ] Promotion Recommendation + Performance Narrative (append-only table, ≥200-char enforcement, audit capture)
+- [ ] Calibration subsystem (Calibration Flag table with partial unique index, HR flag/resolve endpoints, Calibration Queue analytics view)
+- [ ] Organizational Rollout Mode (default `CALIBRATION`, Admin transition endpoint with ≥100-char rationale, Bootstrap Eligibility Snapshot capture in same transaction, append-only `rollout_mode_transitions`)
+- [ ] Map Data Contract with server-enforced anonymization + Rollout-Mode eligibility-state overlay + response headers
+- [ ] Development Notes (private/shared-with-employee, one-way share, audit on share)
 - [ ] Audit system (outbox + append-only log + query/export)
 - [ ] Async job infrastructure (BullMQ, queues, DLQ, retries)
 - [ ] Realtime gateway (Socket.IO + Redis adapter + rooms)

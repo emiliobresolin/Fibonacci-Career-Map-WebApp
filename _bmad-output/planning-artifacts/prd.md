@@ -1,10 +1,11 @@
 ---
 title: "Product Requirements Document: Fibonacci Career Map (FCM)"
 status: "draft"
-version: "1.0"
+version: "1.1"
 created: "2026-04-18"
 updated: "2026-04-18"
 stepsCompleted: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+revision_note: "v1.1 targeted revision: strengthens Manager and HR personas as operational actors, elevates Manager Recommendation and Performance Narrative as mandatory promotion inputs, introduces Calibration and Organizational Rollout-Mode workflows, clarifies map-level visibility anonymization defaults, and strengthens the explanation of why Fibonacci is structural. Preserves all prior decisions including the Score Progress / Readiness % / Promotion Eligibility distinction and the deterministic asynchronous recalculation model."
 inputs:
   - "docs/MVP/mvp_documentation/MVP of FCM APP.pdf"
   - "docs/MVP/images/ChatGPT Image Apr 18, 2026, 10_45_09 AM.png"
@@ -41,23 +42,24 @@ This PRD defines the product-level requirements for the MVP. It is the source do
 
 FCM is **not** a Fibonacci novelty app. It is **not** a 3D visualization dashboard. It is a career progression intelligence platform. The Fibonacci sequence is used in exactly three structural capacities, which are non-negotiable and not configurable:
 
-1. **Visual structure** — the 3D spiral geometry that maps levels and tracks spatially
-2. **Progression weighting** — Fibonacci-scale default weights (1, 2, 3, 5, 8, 13, 21...) for evidence requirements
-3. **Forecasting rhythm** — velocity-based ETA calculation using recent validated progression
+1. **Visual structure** — the 3D spiral geometry maps levels and tracks spatially. Exponential band growth corresponds to the exponential increase in scope, autonomy, and impact between career levels; spatial encoding therefore communicates seniority at a glance without any labels.
+2. **Progression weighting** — Fibonacci-scale default weights (1, 2, 3, 5, 8, 13, 21...) reflect the empirical observation that rare, high-impact contributions are worth disproportionately more than routine activity. This is a defensible default scale; the weights themselves remain organization-configurable.
+3. **Forecasting rhythm** — a 90-day velocity window balances signal freshness with statistical stability. Senior-level evidence events are infrequent but heavy; shorter windows produce noise, longer windows mask stalls. The 90-day window is the rhythm at which the forecast is honest.
 
-The business rules, career models, requirements, weights, approval flows, and visibility are **organization-defined and manager-configurable**.
+**Fibonacci structures the system. Organizations govern the system. Managers decide the outcomes.** The sequence does not, and is never permitted to, replace organizational judgment or the configured promotion policy. Business rules, career models, requirements, weights, approval flows, and visibility are all **organization-defined and admin-configurable**.
 
 ### 2.2 Product Goals
 
 | # | Goal |
 |---|---|
 | G1 | Provide employees a precise, evidence-based view of current career standing, remaining requirements, and realistic promotion timeline |
-| G2 | Give managers a team-level progression view enabling defensible, evidence-backed promotion decisions and early retention-risk detection |
-| G3 | Give HR / Admin a configurable, auditable system of record for career progression across the organization |
+| G2 | Give managers a team-level progression view that supports structured development conversations and enables defensible, evidence-backed promotion **recommendations** — not automated promotion decisions |
+| G3 | Give HR / People an operational governance surface: calibration, rollout oversight, contested-decision reconstruction, and configurable policy — not purely administrative configuration |
 | G4 | Make the career structure of the entire organization navigable and legible through a single interactive 3D surface |
-| G5 | Enforce the distinction between Score Progress, Readiness %, and Promotion Eligibility in every progression view |
-| G6 | Ensure every score, configuration, approval, and promotion event is immutably logged and explainable |
+| G5 | Enforce the distinction between Score Progress, Readiness %, and Promotion Eligibility in every progression view, and further preserve the distinction between Promotion **Eligibility** (a system-computed precondition) and Promotion **Decision** (a human act of manager recommendation + approval workflow) |
+| G6 | Ensure every score, configuration, approval, recommendation, calibration, and promotion event is immutably logged and explainable |
 | G7 | Ship production-ready from MVP: real authentication, real environments, real observability, real audit trails |
+| G8 | Protect organizational trust at first activation: the system reveals organizational reality (who qualifies, who is stalled) but does not force mass-promotion when a career framework is formalized for the first time |
 
 ### 2.3 Non-Goals (MVP)
 
@@ -94,24 +96,29 @@ The business rules, career models, requirements, weights, approval flows, and vi
 - See team distribution across the 3D career map
 - Identify promotion-ready, blocked, and at-risk team members
 - Review and validate evidence with documented reasons
-- Prepare for 1:1s using progression data
-- Initiate promotion requests with evidence backing
+- **Capture private development notes** on each report (coaching topics, observations, 1:1 agenda items) that travel with the employee's context but do not enter the scoring engine
+- **Optionally share specific notes** with the employee as structured development actions, turning private coaching into a visible joint development plan
+- Prepare for 1:1s using progression data + the running development-notes thread
+- **Submit promotion recommendations with a written performance narrative** — an explicit judgment that the employee is performing at the target level, not merely that they have accumulated the required evidence
 - Detect stalled or low-confidence-ETA reports early (retention risk)
 
-**Success signal:** Manager prepares for any development conversation in under 2 minutes using the 3D map and employee detail panel.
+**Success signal:** Manager prepares for any 1:1 in under 2 minutes using the 3D map, the detail panel, and the development-notes thread. When initiating a promotion, the recommendation narrative sits alongside the evidence in the audit record — making the decision defensible without the manager having to reconstruct context from memory.
 
-### 3.3 Admin / HR
+### 3.3 Admin / HR — People & Governance
 
-**Profile:** HR business partners, people operations, organization administrators. Responsible for career framework governance and compliance.
+**Profile:** HR business partners, people operations, organization administrators. **Operationally active** — not purely administrative. This persona is the governance layer that keeps the system fair at organizational scale.
 
 **Primary needs:**
 - Configure career tracks, levels, layers, requirements, weights, and promotion rules
-- Define and modify approval workflows and visibility rules
-- View organization-wide career health and distribution
-- Retrieve audit records for any progression decision
+- Define and modify approval workflows (including per-level policy) and visibility rules
+- **Operate the calibration layer:** review the organization-wide pipeline of eligible and near-eligible employees, flag individual promotions for calibration before final approval, and run structured calibration sessions backed by the system's data
+- **Own the rollout posture:** decide when the organization transitions from Calibration mode (eligibility informational, no promotions fire) to Active mode (promotions operate normally). This decision is explicit, audited, and reversible
+- **Oversee contested decisions:** reconstruct any promotion or evidence approval from the immutable audit log, including the manager's recommendation narrative and any calibration flags
+- Monitor manager approval patterns for fairness and consistency signals (review latency, approval/rejection ratios, narrative completeness)
+- View organization-wide career health, distribution, bench strength, and manager engagement metrics
 - Maintain the system with low ongoing overhead
 
-**Success signal:** HR can configure the system once from the CDF seed, maintain it with minimal effort, and produce complete audit records for any challenged promotion decision.
+**Success signal:** HR activates FCM without triggering a mass-promotion event on day one. HR runs defensible calibration sessions using system data. HR can reconstruct any challenged decision end-to-end within minutes. The system is HR's governance instrument, not merely a reporting tool.
 
 ---
 
@@ -185,8 +192,15 @@ When a user clicks on a node in the 3D map, the **Employee Detail Panel** slides
 
 **Panel actions (role-dependent):**
 - Employee viewing own panel: "Submit Evidence" action against an open requirement
-- Manager viewing report's panel: "Approve / Reject" action on pending evidence; "Initiate Promotion" action enabled only when Promotion Eligibility is `ELIGIBLE`
-- Admin viewing any panel: all actions available plus "View Full Profile" link to dedicated profile page
+- Manager viewing report's panel: "Approve / Reject" action on pending evidence; **"Development Notes"** tab for private coaching notes and share-with-employee actions; "Initiate Promotion" action enabled only when Promotion Eligibility is `ELIGIBLE` **AND** the organization is in Active rollout mode (see §6.9)
+- Admin / HR viewing any panel: all actions available plus "View Full Profile" link, ability to **flag a pending promotion for calibration review**, and ability to see calibration flags already placed on the employee
+- Employee viewing own panel: sees only shared development actions (not private manager notes); sees Eligibility and Readiness % with an explicit note that eligibility is a precondition, not an approval
+
+**Development Notes behavior:**
+- Notes authored by a Manager or Admin are **private by default** — visible only to the author, the target employee's management chain, and HR
+- The author can mark any note as **shared with employee**, converting it into a structured development action visible on the employee's own panel
+- Notes are not an input to the scoring engine; they are conversation scaffolding and context
+- All notes (private and shared) are captured in the audit log with actor and timestamp; notes cannot be edited or deleted after 24 hours (append-only addenda allowed)
 
 **Closing the panel** returns the user to the full 3D canvas with the node deselected.
 
@@ -293,29 +307,37 @@ The Full Profile is a dedicated 2D page, intentionally outside the 3D context, d
 
 **Design principle:** The manager never navigates to a dedicated "Team List" page for this workflow. The 3D map IS the team list, enhanced with spatial context.
 
-### 6.5 Workflow: Promotion Initiation and Approval
+### 6.5 Workflow: Promotion Initiation, Recommendation, and Approval
 
-**Trigger:** An employee's **Promotion Eligibility** (§7.5) flips to `ELIGIBLE` — i.e., all binary gate conditions defined by the organization's configured promotion rules are satisfied.
+**Design intent:** Promotion Eligibility (§7.5) **opens** the promotion conversation. A Manager Recommendation **initiates** it. The configured approval workflow **commits** it. The system never auto-promotes, and "initiating a promotion" is never a mechanical consequence of checklist completion — it is an act of managerial judgment the system captures, challenges, and audits.
 
-1. System re-evaluates Promotion Eligibility on every score recalculation (§7.8)
-2. When Promotion Eligibility is `ELIGIBLE`, the Detail Panel displays a "Promotion-Ready" signal to authorized viewers (Manager, Admin). This signal is never driven by Readiness % alone.
-3. Manager clicks "Initiate Promotion" (UI action is enabled only when Promotion Eligibility is `ELIGIBLE`; backend re-verifies before accepting the request)
-4. System presents a promotion summary: new level, final score, completed requirements, relevant evidence log, optional manager narrative field
-5. Manager submits the promotion request
-6. If approval workflow is configured:
-   - **Single sign-off:** Manager submission completes the promotion
-   - **Dual sign-off:** Another Manager or Admin must co-approve
-   - **HR gate:** Admin/HR must review and approve
+**Trigger:** An employee's Promotion Eligibility flips to `ELIGIBLE`. The system makes this visible; it does not act on it.
+
+1. System re-evaluates Promotion Eligibility on every score recalculation (§7.8).
+2. When Promotion Eligibility is `ELIGIBLE` **and** the organization is in Active rollout mode (§6.9), the Detail Panel displays a "Promotion-Ready — Recommendation Required" signal to authorized viewers (Manager, Admin/HR). This signal is never driven by Readiness % alone.
+3. **Manager Recommendation (mandatory step).** The Manager clicks "Recommend for Promotion." The system presents:
+   - A promotion summary: proposed new level, final score, completed requirements, contributing evidence log
+   - A **mandatory Performance Narrative** field (minimum 200 characters) in which the Manager answers: *"Why is this employee already performing at the target level, beyond the evidence on file?"* The narrative must speak to actual performance, not simply restate accumulated evidence
+   - An optional list of **supporting development notes** (drawn from the employee's notes thread) the Manager wishes to attach as context
+   - A confirmation: *"I recommend this employee for promotion. I understand that Eligibility is a precondition and that this recommendation is my judgment as their manager."*
+4. The Manager submits the recommendation. A PromotionRecord is created in `RECOMMENDED` state. Backend **re-verifies Promotion Eligibility and rollout mode** before accepting.
+5. **Approval workflow execution** per the organization's configured policy for the level:
+   - **Single sign-off:** Manager's recommendation completes the promotion when self-approval is not prohibited (Manager is the recommender, not a co-approver). In SINGLE mode the recommendation IS the approval.
+   - **Dual sign-off:** A second Manager or Admin must co-approve. The co-approver sees the recommendation narrative and the evidence; they record their own reason on approve/reject.
+   - **HR gate:** Admin/HR must review and approve. HR may also flag the record for calibration review (§6.8) before final decision.
+6. **Calibration hold (optional at any approval step).** An Admin/HR may flag a pending promotion for calibration — see §6.8. While flagged, no further approval action is permitted until HR explicitly resolves the flag.
 7. On final approval:
-   - Employee level is updated in the system
-   - Score resets to 0 for the new level (see §14.6 for track-change behavior)
+   - Employee level is updated
+   - Score archived for the previous level; resets to 0 for the new level (see §14.6 for track-change behavior)
    - Node repositions on the 3D map
-   - Promotion event is logged immutably
-   - Employee receives in-app notification
+   - Promotion event is logged immutably, **including** the Manager's recommendation narrative, any calibration flag history, and each approver's reason
+   - Employee receives an in-app notification
 8. On rejection at any approval step:
-   - Rejection reason recorded
-   - Employee remains at current level
-   - Employee receives in-app notification with reason
+   - Rejection reason recorded (mandatory)
+   - Employee remains at current level; the Performance Narrative and rejection reason are preserved for the next promotion cycle's context
+   - Employee receives an in-app notification with the rejection reason (system-level narrative; private calibration notes are not disclosed to the employee)
+
+**Invariant:** Every committed promotion carries a Manager-authored Performance Narrative in the audit record. A promotion with Eligibility `ELIGIBLE` and no recommendation cannot be committed by any code path.
 
 ### 6.6 Workflow: Admin Career Track Configuration
 
@@ -349,6 +371,60 @@ The Full Profile is a dedicated 2D page, intentionally outside the 3D context, d
 
 **Immutability:** Audit events cannot be edited or deleted by anyone, including Admin. The audit log is append-only.
 
+### 6.8 Workflow: Calibration and Promotion Oversight
+
+**Trigger:** Admin/HR needs to review the organization-wide promotion pipeline or wants to hold a specific promotion for calibration before final approval.
+
+**Design intent:** Calibration is the organizational-fairness layer on top of manager-level judgment. It exists to prevent two failure modes: (a) individual managers grading on inconsistent curves across the organization, and (b) promotions that look defensible on paper (evidence + narrative) but do not stand up to cross-team comparison.
+
+**Calibration Queue (HR view):**
+1. Admin navigates to the **Calibration Queue** (new surface in Analytics for HR/Admin only)
+2. The queue shows:
+   - **Eligible — no recommendation yet:** employees the system has flagged Promotion-Eligible but for whom no manager recommendation has been submitted yet
+   - **Recommended — awaiting approval:** promotions with a recommendation and in the approval workflow
+   - **Flagged for calibration:** promotions currently on a calibration hold
+   - **Recently promoted:** last 30 days, for retrospective calibration review
+3. Each row exposes: employee, track, level transition, score, readiness %, recommending manager, recommendation narrative excerpt, days in state
+4. HR can filter by track, team, manager, and level transition
+
+**Calibration Flag action:**
+1. From the Calibration Queue or a specific Employee Detail Panel, an Admin/HR can **flag a pending promotion for calibration review** with a mandatory reason (min 50 characters)
+2. The flag places the PromotionRecord into a **`CALIBRATION_HOLD`** substate within whatever approval-workflow state it occupied
+3. While flagged, no approval action can proceed — the UI and API enforce the hold
+4. The manager who submitted the recommendation is notified
+5. HR can add follow-up calibration notes (private to HR, recorded in audit)
+6. HR explicitly resolves the flag with either **Release** (workflow resumes) or **Reject** (promotion denied, reason recorded, employee notified)
+7. All flag, note, resolution, and release events are logged immutably
+
+**Calibration session support (informational, no separate surface in MVP):**
+- The Calibration Queue itself is the session backbone: HR opens the queue, reviews records with stakeholders, flags or approves as the conversation proceeds
+- Dedicated calibration-session management (scheduling, participants, minutes capture) is explicitly **V2**
+
+### 6.9 Workflow: Organizational Rollout Mode
+
+**Trigger:** A new organization is being activated, or an existing organization wants to re-enter a controlled rollout period (e.g., after a significant configuration change).
+
+**Design intent:** When an organization formalizes a career framework for the first time and imports historical evidence, many employees may appear Promotion-Eligible on day one. If the system immediately signals "Promotion-Ready" across the organization and enables promotion actions, the organization can be pushed into an irresponsible mass-promotion scenario that the real constraints (budget, headcount, leveling consistency) cannot absorb. The product must make this safe by default.
+
+**Rollout modes:**
+
+| Mode | System Behavior | Who Controls Transition |
+|---|---|---|
+| **CALIBRATION** (default on new-org activation) | Eligibility is computed and displayed to HR/Admin. Promotion-Ready signals are **suppressed** for Managers and Employees on the 3D map and Detail Panel. The Calibration Queue is fully populated. Recommendation and approval actions are **disabled** system-wide. All other progression signals (Score Progress, Readiness %, ETA + Confidence) operate normally. | HR / Admin |
+| **ACTIVE** | Full promotion workflow operates as specified in §6.5. | HR / Admin |
+
+**Transition from CALIBRATION to ACTIVE:**
+1. Admin navigates to Settings → Organization → Rollout Mode
+2. System presents the current calibration-queue summary: counts, outstanding flags, average time-at-level for currently-eligible employees
+3. Admin confirms the transition with a mandatory rationale (min 100 characters, logged immutably)
+4. System emits a `RolloutModeChanged` event; all currently-eligible employees immediately see the Promotion-Ready signal (subject to visibility rules); Managers can now submit recommendations
+5. Audit records the transition actor, timestamp, rationale, and the full list of employees who were Eligible at the moment of transition (the "bootstrap eligibility snapshot")
+
+**Reversal (ACTIVE → CALIBRATION):**
+- Permitted but discouraged. Same mandatory-rationale + audit pattern. Any promotions already in flight are preserved in their current approval-workflow state but no new recommendations can be submitted until the organization returns to ACTIVE.
+
+**Who the Calibration Queue and rollout-mode controls are visible to:** Admin/HR only.
+
 ---
 
 ## 7. Scoring, Readiness, ETA, and Confidence
@@ -379,6 +455,8 @@ This is the most important business rule in FCM and is surfaced visibly in every
 - Promotion Eligibility: **ELIGIBLE** — may proceed to promotion initiation
 
 **The rule the product must enforce:** Readiness % is an informational display; Promotion Eligibility is the enforcement gate. Code paths that initiate or approve promotions MUST check Promotion Eligibility (not Readiness %). The UI MAY display Readiness % as a progress indicator but MUST NOT use it as a pre-condition for promotion actions.
+
+**Eligibility is necessary, not sufficient.** Promotion Eligibility means the employee has cleared the configured objective conditions (score, mandatories, time at level, blockers). It does **not** mean the employee must be promoted, nor that the system has decided the employee should be promoted. Eligibility opens the **promotion conversation**; a promotion only commits when the Manager Recommendation, Performance Narrative, and configured approval workflow (§6.5) have completed successfully. The system never advances a level automatically on the basis of eligibility alone.
 
 ### 7.2 Score Calculation
 
@@ -460,6 +538,8 @@ readiness_pct = score_progress_pct * (mandatory_completion_pct / 100)
 **Distinction from Readiness %:**
 - Readiness % is for **human understanding** (shown in UI as a progress indicator)
 - Promotion Eligibility is for **system enforcement** (gates all promotion workflow actions)
+
+**Eligibility opens the promotion conversation. Manager Recommendation + approval workflow commits it.** Promotion Eligibility unlocks the manager's ability to initiate a promotion (§6.5, §11.7) — nothing more. It does not create a promotion record, notify HR, or modify the employee's level. The employee's level changes only after: (1) the Manager authors a Performance Narrative and submits a Recommendation, (2) any configured HR countersign or dual-approval step completes, and (3) the Promotion is not placed on Calibration Hold (§6.8). Eligibility that sits un-acted-on for extended periods is a legitimate organizational state — it may reflect calibration timing, headcount posture, or managerial judgment — and is surfaced to HR through the Analytics dashboard (§11.10) rather than auto-escalated.
 
 ### 7.6 ETA Calculation
 
@@ -562,7 +642,11 @@ Organization-level settings controlling what employees can see about peers:
 - `ORG_SUMMARY` — employee sees org-wide level distribution aggregates (no individual data)
 - `ORG_FULL` — employee sees all employee summary info (name, level, Readiness %) (rare, for transparent cultures)
 
-**Rule:** Managers always see their reports regardless of visibility setting. Admin always sees all. Visibility rules govern only what Employees see about peers.
+**Rule:** Managers always see their reports regardless of visibility setting. Admin/HR always see all. Visibility rules govern only what Employees see about peers.
+
+**Map-Level Anonymization (enterprise-safe default):** The 3D map is the most spatially revealing surface in the product. Employees with `OWN_ONLY` visibility (MVP default) see their own node as identified and all other nodes rendered as **anonymous placeholder nodes** — correct in position (track, level, score band) to preserve the organizational shape, but stripped of name, avatar, Readiness %, ETA, and any identity. Hovering or clicking an anonymous node yields no detail panel; only the aggregate shape is visible. This prevents the map from becoming a peer-pressure surface or a leaderboard while preserving FCM's "you can see where you are in the whole" effect. At `TEAM` visibility, anonymization is lifted for direct team members only; at `ORG_SUMMARY`, individual nodes remain anonymized and only aggregate counts are shown; at `ORG_FULL`, anonymization is fully lifted. Anonymization is enforced server-side at the Map Data Contract level (see architecture §13.3), not client-side.
+
+**Default posture:** New organizations are seeded with `OWN_ONLY`. Escalation to broader visibility is an explicit Admin action, audited per §10.1.
 
 ### 8.7 Approval Workflow
 
@@ -582,6 +666,34 @@ The following are product-invariant:
 - The confidence model structure (High / Medium / Low categorical)
 - The Fibonacci spiral visual structure (immutable product identity)
 - Audit log behavior (always on, always immutable, no org override)
+- The requirement that every committed promotion carries a Manager-authored Performance Narrative (§6.5)
+- The existence of the Calibration Hold affordance for HR (§6.8)
+- The existence of the two-state Rollout Mode model (§8.9)
+
+### 8.9 Organizational Rollout Mode
+
+Organizations adopting FCM almost always begin with a large population of employees who — measured against the newly activated configuration — would compute as Promotion-Eligible on day one. Without an explicit transition construct, this creates a bootstrap promotion surge, destabilizes managerial judgment, and invites the system to be perceived as an automatic-promotion engine. Rollout Mode is the organization-level posture that controls how Promotion Eligibility is surfaced and actionable across the org.
+
+**Two modes (organization-scoped, admin-configurable):**
+
+| Mode | Promotion Actions Enabled | Map & Panel Display | Score / Readiness / ETA | Default For |
+|---|---|---|---|---|
+| `CALIBRATION` | **Disabled** — "Initiate Promotion" is suppressed org-wide even for Eligible employees | Readiness % and ETA are computed and shown, Eligibility is computed and stored, but the Eligibility badge is labeled "Eligible — Pending Calibration" and no promotion UI is exposed | Fully active | New organizations (seeded default) |
+| `ACTIVE` | Enabled per-employee, gated by Eligibility + Calibration Flag state | Eligibility fully visible; promotion UI exposed for eligible, non-flagged employees | Fully active | Established organizations post-calibration |
+
+**Behavioral rules:**
+- New organizations are seeded with `CALIBRATION` on first activation. This is not a bug state — it is the safe default that gives HR and management time to review the bootstrap eligibility landscape before the org's first promotion cycle on FCM.
+- Transition from `CALIBRATION` to `ACTIVE` requires:
+  1. An Admin action
+  2. A mandatory rationale string (≥100 characters) explaining the calibration outcome (e.g., "Manager calibration meetings completed 2026-05-02; top tier aligned on upcoming cycle.")
+  3. Automatic capture of a **Bootstrap Eligibility Snapshot** — an immutable record of every employee's Eligibility, Score, Readiness %, and Calibration Flag state at the moment of transition. This snapshot is retained forever and is the authoritative "starting line" the organization can later audit against.
+- The reverse transition (`ACTIVE` → `CALIBRATION`) is permitted (e.g., mid-year re-calibration, mid-reorg) and is audited with rationale, but does not re-snapshot; it simply suppresses promotion UI again.
+- Rollout Mode does NOT affect score recalculation, evidence workflow, audit logging, or ETA/Confidence display. Data continues to flow; only promotion-initiation surface area is gated.
+- Rollout Mode is visible to all Managers and HR in the Settings surface and on relevant Manager/HR views as a banner ("Org in Calibration mode — promotion workflow suspended"); Employees do not see the banner but do see the reworded Eligibility label where applicable.
+
+**Why this is configurable:** organizations land on FCM at different maturity levels. Small orgs may prefer to skip `CALIBRATION` by transitioning immediately post-seeding. Large enterprises may stay in `CALIBRATION` for weeks. The mode is an org policy knob, not a product policy knob.
+
+**Why the default is `CALIBRATION`:** the cost of a wrong auto-promotion surge (organizational trust, payroll, narrative coherence) vastly exceeds the cost of a short promotion pause at go-live. The product's default posture is "earn promotion velocity, not inherit it."
 
 ---
 
@@ -696,6 +808,10 @@ Each requirement is tagged with an ID for traceability into epics and stories.
 | FR-3.11 | Managers can initiate promotion requests inline only when Promotion Eligibility is `ELIGIBLE` |
 | FR-3.12 | Panel content respects visibility rules for the viewing user |
 | FR-3.13 | Closing the panel returns to the full 3D canvas |
+| FR-3.14 | The panel exposes a Development Notes tab for Managers viewing a direct report: notes may be marked `PRIVATE` (visible to Manager, HR, and any configured skip-level only) or `SHARED_WITH_EMPLOYEE` (visible additionally to the Employee). State transitions are auditable and irreversible (a shared note cannot be un-shared). |
+| FR-3.15 | The panel exposes a "Flag for Calibration" action for HR on any employee in `ELIGIBLE` state. Flagging opens a mandatory reason field (≥40 characters) and transitions the Eligibility UI-state to `CALIBRATION_HOLD` until resolved by HR. |
+| FR-3.16 | When the organization's Rollout Mode is `CALIBRATION` (§8.9), the "Initiate Promotion" action is suppressed regardless of Eligibility; the panel displays "Eligible — Pending Calibration" and a banner explaining the org-level mode. |
+| FR-3.17 | When an Employee views a peer node they are allowed to see (per §8.6 visibility), Score, ETA, Confidence, and Development Notes are never exposed — only anonymized or summary fields as configured. |
 
 ### 11.4 Evidence Management
 
@@ -755,6 +871,11 @@ Each requirement is tagged with an ID for traceability into epics and stories.
 | FR-7.7 | Approved promotions update the employee's level, archive the previous-level score, and reposition the node on the 3D map |
 | FR-7.8 | All promotion events are logged immutably |
 | FR-7.9 | Employees receive in-app notifications of promotion approval or rejection |
+| FR-7.10 | Every initiated promotion carries a Manager-authored Performance Narrative (free-text, minimum 200 characters). Submission without a Performance Narrative is rejected at the API boundary with a structured validation error. |
+| FR-7.11 | The Performance Narrative is captured into the immutable audit log and the promotion record; it is never editable after submission. Corrections require a new promotion cycle with a new narrative. |
+| FR-7.12 | HR may place any pending or newly eligible promotion on Calibration Hold; while on hold, promotion approval API endpoints reject the request with a structured error identifying the calibration flag ID. |
+| FR-7.13 | When Rollout Mode is `CALIBRATION`, all promotion initiation/approval/commit endpoints reject requests with a structured error indicating the organization is in calibration posture; this rejection is itself audited. |
+| FR-7.14 | Transitioning Rollout Mode from `CALIBRATION` to `ACTIVE` is an Admin-only action requiring a rationale of ≥100 characters and triggers capture of an immutable Bootstrap Eligibility Snapshot containing every employee's Score, Readiness %, Promotion Eligibility, and Calibration Flag state at the transition moment. |
 
 ### 11.8 Audit Log
 
@@ -785,6 +906,9 @@ Each requirement is tagged with an ID for traceability into epics and stories.
 | FR-10.2 | Analytics view surfaces lists of promotion-ready employees, stalled employees, and at-risk employees |
 | FR-10.3 | Analytics view displays aggregate velocity and readiness trends over time |
 | FR-10.4 | Analytics scope respects role: Managers see team-scoped analytics; Admin sees org-wide |
+| FR-10.5 | HR-scoped Analytics view exposes a **Calibration Queue** listing all employees currently in `ELIGIBLE` or `CALIBRATION_HOLD` state, sortable by eligibility date, manager, track, and level. Each row supports one-click navigation to the employee's Detail Panel and to the Calibration Flag resolution action. |
+| FR-10.6 | HR-scoped Analytics view exposes a **Bootstrap Eligibility Snapshot** explorer: when the organization has transitioned from `CALIBRATION` → `ACTIVE`, HR can view the immutable snapshot captured at transition and compare it to current state. |
+| FR-10.7 | HR-scoped Analytics view exposes a **Manager Approval Pattern** report showing, per manager, counts of promotions recommended, eligibility-to-recommendation latency, and Performance Narrative length distribution, to support calibration and detect outliers. |
 
 ### 11.11 Dashboard (2D)
 
@@ -1026,6 +1150,38 @@ The Product Brief flagged 7 blockers requiring PRD-level resolution. Each is res
 
 **Rationale:** Certifications and time-sensitive credentials genuinely expire in the real world. The product must reflect this. Score recalculation preserves the integrity of the Score Progress / Readiness % / Promotion Eligibility model — expiry of a mandatory credential flips Promotion Eligibility back to `NOT ELIGIBLE` even if the score is unchanged. Employee notification gives them time to renew before Promotion Eligibility degrades.
 
+### 14.8 Bootstrap Promotion Surge at First Activation — **RESOLVED**
+
+**Decision:** **Two-state organizational Rollout Mode with `CALIBRATION` as the default on new organizations.** See §8.9 for the full configuration surface and §11.7 / §11.10 for the corresponding functional requirements.
+
+**PRD behavior at first activation:**
+1. Organization seeds with Rollout Mode = `CALIBRATION`
+2. Scoring, recalculation, Readiness %, and ETA continue to compute normally; Promotion Eligibility is evaluated and stored
+3. Promotion initiation, approval, and commit endpoints are blocked org-wide; UI surfaces the "Eligible — Pending Calibration" state and a banner explaining the calibration posture
+4. HR reviews the Calibration Queue (FR-10.5), calibrates with managers, and flags any eligible employee who needs organizational review
+5. When calibration is complete, Admin transitions to `ACTIVE` with a mandatory rationale ≥100 characters; the Bootstrap Eligibility Snapshot is captured at that moment and retained immutably
+6. Post-transition, promotion workflow operates normally, gated by Eligibility + absence of Calibration Hold + completed Manager Recommendation and approval workflow
+
+**Rationale:** Without this resolution, FCM's first activation for any non-trivial org computes hundreds of "Eligible" employees simultaneously — a politically and operationally catastrophic signal. The two-state model turns the first activation into an intentional calibration step rather than an implicit promotion storm, protecting organizational trust in the system. The Bootstrap Eligibility Snapshot gives HR an immutable audit anchor of "what the system would have said on day one," enabling defensible post-hoc review.
+
+**Tradeoff accepted:** The default `CALIBRATION` mode means organizations see FCM's promotion workflow as "suspended" until they explicitly activate it. This is surfaced clearly in Settings and onboarding guidance. Small organizations with no existing career-model inheritance may transition to `ACTIVE` immediately.
+
+### 14.9 Promotion as Human Decision, Not Computed Outcome — **RESOLVED**
+
+**Decision:** **Promotion Eligibility is a necessary precondition, never a sufficient one. Every committed promotion carries a Manager-authored Performance Narrative, and HR may intervene via Calibration Flag.** See §6.5 (workflow), §6.8 (calibration), §7.5 (eligibility), §11.7 (FRs) for the mechanisms.
+
+**PRD behavior:**
+1. The system computes Promotion Eligibility but never auto-initiates a promotion
+2. "Initiate Promotion" is a Manager action, available only when (a) Eligibility = `ELIGIBLE`, (b) no active Calibration Hold, (c) Rollout Mode = `ACTIVE`
+3. Every initiation requires a Performance Narrative (free-text, ≥200 characters) describing the Manager's judgment of the employee's performance at level — not a restatement of the checklist, but the Manager's own case
+4. The Narrative is captured in the promotion record and audit log and is immutable thereafter
+5. HR may place any eligibility state or pending promotion on Calibration Hold (FR-7.12) with a reason; holds block approval paths until HR resolves
+6. Configured approval workflow (single / dual / HR gate per §8.7) executes after the Manager's Recommendation; the level transition commits only on completion of the full chain
+
+**Rationale:** The most dangerous failure mode for a system like FCM is to be perceived as an automatic-promotion engine — a checklist that, when satisfied, produces a promotion without human judgment. This erodes managerial authority, invalidates organizational context (headcount, business priorities, peer comparisons), and makes the system feel mechanical rather than intelligent. The resolution reframes FCM as the **system that surfaces the facts and enforces the discipline of the decision, but never replaces the decision itself.** The Performance Narrative is the artifact that makes this explicit: it requires the Manager to say, in their own words, why this person should be promoted now. This single requirement prevents the entire "checklist promotion" failure mode.
+
+**Tradeoff accepted:** Managers must invest effort in writing narratives; this is an intentional cost. The 200-character minimum is deliberately modest to avoid theater while still requiring a substantive statement. Organizations valuing higher rigor can extend this in configuration (V2).
+
 ---
 
 ## 15. Core Data Entities (Product Level)
@@ -1112,6 +1268,10 @@ This is a product-level data model. The architect will define the physical schem
 | R7 | Score inflation due to overly generous requirement weights | Low | Med | Admin visibility into weight changes + configuration audit log |
 | R8 | Manager abuse of approval authority | Low | High | Mandatory reason fields + audit trail + optional dual-approval workflow + Admin engagement reports |
 | R9 | 3D accessibility limitations | Med | Low-Med | 2D alternative views (Analytics, Dashboard) provide accessible paths; aria-label summaries for context |
+| R10 | Bootstrap promotion surge at first activation (large cohort computes as Eligible simultaneously) | High | High | §8.9 Rollout Mode with `CALIBRATION` default + §14.8 resolution + Bootstrap Eligibility Snapshot + HR Calibration Queue (FR-10.5) |
+| R11 | System perceived as automatic-promotion engine (erodes managerial authority, feels mechanical) | Med | High | §14.9 resolution: Manager Recommendation + Performance Narrative mandatory for every initiated promotion; Calibration Flag gives HR intervention authority; FR-7.10/7.11 enforcement |
+| R12 | Peer pressure / leaderboard effect from map visibility | Med | Med | §8.6 enterprise-safe map anonymization default (`OWN_ONLY` seeds new orgs; peer nodes rendered anonymously to preserve shape without identity); escalation to broader visibility is explicit Admin action |
+| R13 | Score ≠ Readiness ≠ Eligibility distinction lost in UI or API consumer code | Med | High | FR-3.6, FR-5.4, FR-7.4 require the distinction to be enforced at every surface; Promotion Eligibility server-side check on all promotion endpoints |
 
 ---
 
@@ -1148,6 +1308,10 @@ The MVP is successful when all of the following are demonstrably true:
 8. Role-based access with three roles: Employee, Manager, Admin / HR.
 9. OIDC / SSO-ready authentication from MVP.
 10. Dark mode UI, desktop-first, cloud-ready deployment from day one.
+11. Promotion is a human decision. The system surfaces Eligibility and enforces discipline; a Manager's Recommendation with a Performance Narrative (≥200 chars) plus the configured approval workflow is what commits a promotion. The system never auto-promotes.
+12. Enterprise-safe map visibility default: new organizations seed with `OWN_ONLY`, and the map anonymizes non-visible peer nodes server-side to preserve organizational shape without identity.
+13. Organizational Rollout Mode defaults to `CALIBRATION` on new organizations. Transition to `ACTIVE` is an Admin action requiring rationale ≥100 characters and captures an immutable Bootstrap Eligibility Snapshot.
+14. Admin / HR is an operational persona, not a configuration audience — the Calibration Queue, Calibration Flag, Rollout-Mode control, and Bootstrap Eligibility Snapshot explorer are first-class HR surfaces.
 
 ### 19.2 Resolved Blocker Decisions (§14)
 
@@ -1160,6 +1324,8 @@ The MVP is successful when all of the following are demonstrably true:
 | B5 | Manager visibility scope on 3D map | Managers see full org map; only direct reports are clickable with full detail; default "My Team" filter on login |
 | B6 | Track change / transfer behavior | Score archived; new track starts at 0; all history preserved in audit; optional manual evidence re-association by Admin |
 | B7 | Evidence expiry behavior | Automatic state transition `APPROVED → EXPIRED`; score recalculation; employee notification; audit logged |
+| B8 | Bootstrap promotion surge at first activation | Two-state Rollout Mode (`CALIBRATION` default / `ACTIVE`) per §8.9; explicit Admin transition with rationale; immutable Bootstrap Eligibility Snapshot captured at transition; HR Calibration Queue surfaces the eligibility landscape before any promotion is actioned |
+| B9 | Promotion-as-checklist failure mode | §14.9 resolution: Eligibility is necessary not sufficient; every initiated promotion requires Manager-authored Performance Narrative (≥200 chars) captured immutably; HR may place any eligibility or pending promotion on Calibration Hold with reason; approval workflow commits the promotion, not the gate computation |
 
 ### 19.3 Remaining Blockers for the Architect Step Only
 
