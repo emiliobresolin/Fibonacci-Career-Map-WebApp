@@ -1,0 +1,16 @@
+{
+  "name": "@fcm/api",
+  "version": "0.0.0",
+  "private": true,
+  "description": "NestJS API + worker — modular monolith (scaffold placeholder; full init in Story 1-2)",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@fcm/domain-contracts": "workspace:*",
+    "@fcm/scoring-core": "workspace:*"
+  }
+}

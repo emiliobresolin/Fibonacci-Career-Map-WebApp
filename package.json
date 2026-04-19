@@ -1,0 +1,22 @@
+{
+  "name": "fcm",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Fibonacci Career Map — monorepo root",
+  "packageManager": "pnpm@9.15.0",
+  "engines": {
+    "node": ">=20.11.0",
+    "pnpm": ">=9.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r --parallel run build",
+    "dev": "pnpm -r --parallel run dev",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "pnpm -r --parallel run lint",
+    "test": "pnpm -r --parallel run test",
+    "test:scaffold": "node --test \"tests/scaffold/**/*.test.mjs\""
+  },
+  "devDependencies": {
+    "typescript": "5.5.4"
+  }
+}

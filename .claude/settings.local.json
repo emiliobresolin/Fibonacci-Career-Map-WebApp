@@ -1,0 +1,21 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm --version)",
+      "Bash(npm --version)",
+      "Bash(corepack enable *)",
+      "Bash(corepack prepare *)",
+      "Bash(npm install *)",
+      "Bash(node --test tests/scaffold)",
+      "Bash(node --test tests/scaffold/*.test.mjs)",
+      "Bash(node -e \"const fs=require\\('fs'\\);const r=fs.readFileSync\\('README.md','utf8'\\);console.log\\('len:',r.length\\);console.log\\('has apps/web:', r.includes\\('apps/web'\\)\\);console.log\\('first 200 hex:', Buffer.from\\(r\\).slice\\(0,50\\).toString\\('hex'\\)\\);\")",
+      "Bash(node -e \"const fs=require\\('fs'\\);const r=fs.readFileSync\\('README.md','utf8'\\);const i=r.indexOf\\('web'\\);console.log\\('web at:',i\\);console.log\\('context:',JSON.stringify\\(r.slice\\(i-20,i+30\\)\\)\\);console.log\\('has apps:', r.includes\\('apps'\\)\\);\")",
+      "Bash(pnpm install *)",
+      "Bash(pnpm -r run typecheck)",
+      "Bash(node --test tests/scaffold/)",
+      "Bash(node --test \"tests/scaffold/**/*.test.mjs\")",
+      "Bash(pnpm run *)",
+      "Bash(git add *)"
+    ]
+  }
+}

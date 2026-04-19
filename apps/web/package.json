@@ -1,0 +1,15 @@
+{
+  "name": "@fcm/web",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Next.js 14 frontend — 3D Career Map + 2D deep views (scaffold placeholder; full init in Story 1-3)",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "build": "tsc",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@fcm/domain-contracts": "workspace:*"
+  }
+}
