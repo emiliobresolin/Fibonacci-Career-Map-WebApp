@@ -9,7 +9,7 @@ development_status:
   epic-1: backlog
   1-1-monorepo-workspace-scaffold: review
   1-2-nestjs-api-scaffold-with-dual-mode-bootstrap: done
-  1-3-next-js-14-app-router-scaffold-with-dark-mode-theme: backlog
+  1-3-next-js-14-app-router-scaffold-with-dark-mode-theme: done
   1-4-prisma-schema-baseline-and-migration-tooling: backlog
   1-5-managed-postgres-redis-and-object-storage-provisioned-via-terraform: backlog
   1-6-containerization-and-kubernetes-deployment-manifests-for-api-and-worker: backlog
