@@ -115,6 +115,51 @@ model User {
   @@map("users")
 }
 
+/// Append-only audit log (Arch §6.4 + §9.3, AD-7, NFR-5.1, NFR-5.2). Every
+/// state-mutating domain operation eventually lands here via the outbox-relay
+/// worker (Story 3-3). The table is RANGE-partitioned by `occurred_at` (monthly)
+/// at the DB level — Prisma doesn't model partitions natively, so the migration
+/// hand-rolls the PARTITION BY clause + monthly child tables + the BEFORE
+/// UPDATE/DELETE/TRUNCATE triggers (ENABLE ALWAYS) that enforce append-only
+/// regardless of connecting role or session_replication_role. The app DB
+/// role's INSERT+SELECT-only permission is the primary enforcement; the
+/// triggers are defense-in-depth.
+///
+/// `before`/`after` JSONB capture the pre- and post-state snapshot for any
+/// mutation (not a diff — full state of the affected entity, to keep
+/// reconstruction cheap and self-contained). Both are nullable: pure-creation
+/// events leave `before` null, deletion events leave `after` null, and read
+/// events leave both null. GIN(jsonb_path_ops) indexes on both columns make
+/// field-level investigations via @> containment queries cheap.
+///
+/// Note on the composite primary key: PostgreSQL requires the partition
+/// key (`occurred_at`) to be part of every unique constraint on a
+/// partitioned table, hence `@@id([id, occurredAt])` rather than a single
+/// `id @id`. Lookups by `id` alone are unusual for an audit log — queries
+/// typically scan `(organization_id, occurred_at)` ranges.
+model AuditEvent {
+  id              String   @default(uuid()) @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  /// Nullable for system-actor events (cron jobs, outbox relay, GC sweeps)
+  /// that have no human originator. The outbox-relay row that produced this
+  /// event always carries the originating actor when one exists.
+  actorId         String?  @map("actor_id") @db.Uuid
+  eventType       String   @map("event_type")
+  entityType      String   @map("entity_type")
+  /// Nullable so we can record events that operate on a synthetic
+  /// org-scope target (e.g., bulk admin actions) without a single row id.
+  entityId        String?  @map("entity_id") @db.Uuid
+  before          Json?
+  after           Json?
+  reason          String?
+  occurredAt      DateTime @default(now()) @map("occurred_at") @db.Timestamptz
+
+  @@id([id, occurredAt])
+  @@index([organizationId, occurredAt])
+  @@index([entityType, entityId, occurredAt])
+  @@map("audit_events")
+}
+
 /// Per-(user, organization) role row. PRD §4.2 + Arch §10.2: a user can hold
 /// exactly one of {EMPLOYEE, MANAGER, ADMIN} within an Organization, with the
 /// dual-role carve-out for Admin+Employee enforced by the composite unique
