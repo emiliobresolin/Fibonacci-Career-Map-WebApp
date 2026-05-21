@@ -10,10 +10,10 @@ so that the client is never trusted to hide data.
 
 ## Acceptance Criteria
 
-1. Endpoint returns `{ nodes: [...] }` matching the `MapNode` contract (Arch §13.3): `employee_id` (nullable), `track_id`, `level_id`, `band_position` (0–1), `score` (nullable), `readiness_pct` (nullable), `promotion_eligible` (nullable), `eligibility_state`, `at_risk` (nullable), `anonymized`.
+1. Endpoint returns `{ nodes: [...] }` matching the `MapNode` contract (Arch §13.3): `employee_id` (nullable), `track_id`, `level_id`, `band_position` (0–1), `score` (nullable), `readiness_pct` (nullable), `promotion_eligible` (nullable), `eligibility_state` ∈ `{'ELIGIBLE'|'NOT_ELIGIBLE'|'PENDING_CALIBRATION'|'CALIBRATION_HOLD'}` (canonical enum pinned in Arch §13.3 — no other values permitted), `at_risk` (nullable), `anonymized`.
 2. Filter scope: Managers default to "My Team" (FR-2.15); `?scope=org` toggles off the default; ADMIN sees all.
 3. Values come from `employee_current_snapshot`; no recomputation.
-4. Response includes headers `X-FCM-Rollout-Mode` and `X-FCM-Visibility-Scope`.
+4. Response includes headers `X-FCM-Rollout-Mode`, `X-FCM-Visibility-Scope`, and `Cache-Control: no-store, private`. **The endpoint MUST NOT be placed behind any shared cache (CDN, Redis cache layer, NestJS `CacheInterceptor`, reverse-proxy response cache).** Per-request memoization within a single handler invocation is permitted; cross-request caching is forbidden — see Arch §13.3 rationale (cross-viewer payload poisoning is a privacy incident). A CI assertion in EPIC-16 verifies the response headers and the absence of cache decorators on this controller.
 
 ## Tasks / Subtasks
 
@@ -36,7 +36,7 @@ so that the client is never trusted to hide data.
 
 ### References
 
-- Arch §13.3
+- Arch §13.3 (pinned `eligibility_state` enum + no-cache rule)
 - PRD FR-2.15, §14.5
 - [Source: planning-artifacts/stories.md — index entry for this story]
 

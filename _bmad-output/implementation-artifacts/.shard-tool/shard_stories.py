@@ -21,7 +21,7 @@ PLANNING_DIR = IMPL_DIR.parent / "planning-artifacts"
 STORIES_MD = PLANNING_DIR / "stories.md"
 SPRINT_STATUS = IMPL_DIR / "sprint-status.yaml"
 
-STORY_HEADER_RE = re.compile(r"^###\s+STORY-E(\d+)\.(\d+)\s+[—-]\s+(.+?)\s*$", re.MULTILINE)
+STORY_HEADER_RE = re.compile(r"^###\s+STORY-E(\d+)\.(\d+[a-z]?)\s+[—-]\s+(.+?)\s*$", re.MULTILINE)
 APPENDIX_RE = re.compile(r"^##\s+Appendix", re.MULTILINE)
 
 
@@ -48,7 +48,7 @@ def parse_stories(md: str) -> list[dict]:
         body = md[body_start:end].strip()
 
         epic = int(m.group(1))
-        story = int(m.group(2))
+        story = m.group(2)  # may be e.g. "2" or "2a"
         title = m.group(3).strip()
         blocks.append({
             "epic": epic,
@@ -59,6 +59,14 @@ def parse_stories(md: str) -> list[dict]:
             "story_key": f"{epic}-{story}-{kebab(title)}",
         })
     return blocks
+
+
+def _story_sort_key(s: str) -> tuple:
+    """Natural sort: '2' < '2a' < '2b' < '3' < '10'."""
+    m = re.match(r"^(\d+)([a-z]?)$", s)
+    if not m:
+        return (10**9, s)
+    return (int(m.group(1)), m.group(2) or "")
 
 
 def extract_ac_bullets(body: str) -> list[str]:
@@ -247,7 +255,7 @@ def write_sprint_status(blocks: list[dict]) -> None:
         by_epic.setdefault(b["epic"], []).append(b)
     for epic_num in sorted(by_epic.keys()):
         lines.append(f"  epic-{epic_num}: backlog")
-        for b in sorted(by_epic[epic_num], key=lambda x: x["story"]):
+        for b in sorted(by_epic[epic_num], key=lambda x: _story_sort_key(x["story"])):
             lines.append(f"  {b['story_key']}: backlog")
     lines.append("")
     SPRINT_STATUS.write_text("\n".join(lines), encoding="utf-8")

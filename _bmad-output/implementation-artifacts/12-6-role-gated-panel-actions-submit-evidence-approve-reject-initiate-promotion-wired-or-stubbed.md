@@ -12,7 +12,7 @@ I want role-specific actions inside the panel.
 1. Employee on own panel: "Submit Evidence" button opens the evidence-submission flow (wired to E8.2).
 2. Manager on report's panel: "Approve" / "Reject" actions on any pending evidence item inline (wired to E8.4).
 3. "Initiate Promotion" button rendered but its wiring is completed in E13.8; when the org is in `CALIBRATION`, the button is suppressed and replaced with the label "Eligible — Pending Calibration" (per FR-3.16).
-4. "Flag for Calibration" action visible to HR only on nodes in `ELIGIBLE` state; wired in E13.6 (UI stub here).
+4. "Flag for Calibration" action visible to HR only on nodes in `ELIGIBLE` state; wired in E13.5 (UI stub here).
 5. "View Full Profile" link for Manager and Admin; wired in E15.3.
 
 ## Tasks / Subtasks

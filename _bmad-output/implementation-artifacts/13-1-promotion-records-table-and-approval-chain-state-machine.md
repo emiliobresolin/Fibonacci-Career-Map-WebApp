@@ -10,7 +10,7 @@ so that every step is auditable.
 
 ## Acceptance Criteria
 
-1. Migration creates `promotion_records(id, organization_id, employee_id, from_level_id, to_level_id, state enum, initiated_at, completed_at)` with state transitions: `RECOMMENDED → IN_REVIEW → APPROVED | REJECTED | CALIBRATION_HOLD`; `CALIBRATION_HOLD → IN_REVIEW | REJECTED`.
+1. Migration creates `promotion_records(id, organization_id, employee_id, from_level_id, to_level_id, state enum, workflow_at_initiate approval_workflow_enum NOT NULL, initiated_at, completed_at)` with state transitions: `RECOMMENDED → IN_REVIEW → APPROVED | REJECTED | CALIBRATION_HOLD | REJECTED_AT_COMMIT`; `CALIBRATION_HOLD → IN_REVIEW | REJECTED`; `APPROVED → REJECTED_AT_COMMIT` (commit-time gate failure). `workflow_at_initiate` snapshots the workflow at initiate so mid-flight config changes do not re-evaluate in-flight promotions.
 2. Domain-layer state machine rejects illegal transitions.
 3. Append-only for terminal states.
 
@@ -29,11 +29,12 @@ so that every step is auditable.
 ### Dependencies
 
 - E6.2
+- E6.2a
 - E2.6
 
 ### References
 
-- Arch §6.2
+- Arch §6.2, §5.4
 - [Source: planning-artifacts/stories.md — index entry for this story]
 
 ## Dev Agent Record

@@ -435,6 +435,29 @@ AC:
 
 Depends on: E2.6, E6.1. Refs: Arch §5.1, §6.2; PRD §8.
 
+### STORY-E6.2a — Employees and employee_assignments tables
+As an engineer, I want the core `employees` and `employee_assignments` tables so every downstream domain has the entity its FKs reference.
+
+AC:
+- Migration creates `employees(id UUID PK, organization_id UUID FK NOT NULL, user_id UUID FK NOT NULL, track_id UUID FK, level_id UUID FK, assigned_at TIMESTAMPTZ, deactivated_at TIMESTAMPTZ NULL, created_at, updated_at)` with RLS enabled and `(organization_id, user_id)` uniqueness.
+- Migration creates `employee_assignments(id UUID PK, employee_id UUID FK NOT NULL, organization_id UUID FK NOT NULL, role role_enum NOT NULL, manager_employee_id UUID FK NULL, assigned_at TIMESTAMPTZ, deactivated_at TIMESTAMPTZ NULL)` with RLS and partial unique index `(employee_id, organization_id, role) WHERE deactivated_at IS NULL`.
+- A `BEFORE INSERT/UPDATE` trigger on `employee_assignments` rejects self-management (`employee_id = manager_employee_id`).
+- A repository (`EmployeesRepository`) is exposed in the `identity` module; no other module accesses the table directly.
+- Unit test covers RLS isolation (org-A cannot read org-B's employees), self-management rejection, and uniqueness violation.
+
+Depends on: E6.2, E2.6. Refs: Arch §6.2 (`employees`, `employee_assignments`); PRD §4.2, §6.1.
+
+### STORY-E6.2b — employee_blockers table for active-blocker eligibility check
+As HR, I want a formal `employee_blockers` table so the §7.5 condition-4 active-blocker check has a concrete data source.
+
+AC:
+- Migration creates `employee_blockers(id UUID PK, organization_id UUID FK, employee_id UUID FK, kind blocker_kind_enum('PIP','PERFORMANCE_CONCERN','HR_HOLD','OTHER'), reason TEXT NOT NULL CHECK (char_length(reason) >= 20), opened_at TIMESTAMPTZ, resolved_at TIMESTAMPTZ NULL, opened_by UUID FK, resolved_by UUID FK NULL)` with RLS and partial unique index `(employee_id, kind) WHERE resolved_at IS NULL`.
+- Admin/HR-only API: `POST /v1/employees/:id/blockers` and `PATCH /v1/blockers/:id/resolve`; non-Admin returns 403.
+- Every open/resolve action emits an audit event via outbox.
+- Integration test: opening a blocker flips Eligibility to `NOT_ELIGIBLE` on the next recalc; resolving restores it.
+
+Depends on: E6.2a, E3.3. Refs: PRD §7.5 condition 4, §8.5; Arch §6.2 (`employee_blockers`).
+
 ### STORY-E6.3 — SeedingService with CDF defaults
 As an Admin bootstrapping a new org, I want the CDF defaults seeded so employees can appear on the map on day one.
 
@@ -444,7 +467,7 @@ AC:
 - Every seeded row emits a `configuration.seeded` audit event via the outbox.
 - Unit test covers the full seeded state.
 
-Depends on: E6.2. Refs: PRD §6.1, §8; Epics §4 E6.
+Depends on: E6.2, E6.2a. Refs: PRD §6.1, §8; Epics §4 E6.
 
 ### STORY-E6.4 — First-Admin bootstrap flow
 As an Admin, I want a first-admin bootstrap UI/CLI so I can log in before OIDC is configured.
@@ -462,11 +485,12 @@ As an Admin, I want to import a roster CSV so I don't have to add employees one 
 AC:
 - `POST /v1/employees/bulk-import` accepts a CSV with `email`, `display_name`, `track_slug`, `level_code`, `manager_email`.
 - Dry-run mode (`?dryRun=true`) validates and returns a per-row preview without writing.
-- Commit mode creates users (stub profile until first SSO login), employee assignments, and role_assignments; every row produces an audit event.
+- Commit mode creates `users` (stub profile until first SSO login), `employees` rows, and `employee_assignments` (resolving each `manager_email` to the corresponding `manager_employee_id`); every row produces an audit event.
+- Rows whose `manager_email` does not resolve to an already-created employee in the same CSV or a pre-existing employee are rejected with a structured error.
 - Validation errors return a structured report: row index, field, reason.
 - An integration test covers 10 valid rows and 3 invalid rows; all side-effects roll back on commit failure.
 
-Depends on: E6.3. Refs: PRD §6.1, FR-NFR-8.1; Arch §13.5.
+Depends on: E6.2a, E6.3, E2.6, E3.3. Refs: PRD §6.1, NFR-8.1; Arch §13.5, §6.2.
 
 ### STORY-E6.6 — Integration test: seed → assign → fetch map employees happy path
 As a team, I want a single end-to-end test that proves the bootstrap pipeline so regressions show up early.
@@ -502,7 +526,7 @@ AC:
 - Mutation emits an audit event.
 - Integration test covers a valid create, an overlapping reject, and a gap-tolerant update.
 
-Depends on: E7.1. Refs: PRD FR-6.2; Arch §6.2.
+Depends on: E7.1, E2.6, E3.3. Refs: PRD FR-6.2; Arch §6.2.
 
 ### STORY-E7.3 — Layers CRUD
 As Admin, I want to configure layers per level.
@@ -512,7 +536,7 @@ AC:
 - Each level requires at least one layer; the last-remaining-layer delete returns `409 LAYER_MIN_VIOLATION`.
 - Mutation emits audit event.
 
-Depends on: E7.2. Refs: PRD FR-6.3.
+Depends on: E7.2, E2.6, E3.3. Refs: PRD FR-6.3.
 
 ### STORY-E7.4 — Requirements CRUD (weight, mandatory flag, evidence type, expiry)
 As Admin, I want to configure requirements per layer.
@@ -523,7 +547,7 @@ AC:
 - Mutation emits audit event.
 - A requirement cannot be hard-deleted once referenced by any evidence record; soft-deactivate instead.
 
-Depends on: E7.3. Refs: PRD FR-6.4, §8.4.
+Depends on: E7.3, E2.6, E3.3. Refs: PRD FR-6.4, §8.4.
 
 ### STORY-E7.5 — Promotion Rules CRUD per level
 As Admin, I want to configure promotion rules per level.
@@ -533,7 +557,7 @@ AC:
 - Fields: `min_score`, `mandatory_completion_required BOOL`, `min_time_at_level_months INT nullable`, `manager_approval_required BOOL`, `hr_counter_sign_required BOOL`, `active_blocker_check BOOL`.
 - Mutation emits audit event.
 
-Depends on: E7.2. Refs: PRD FR-6.5, §8.5.
+Depends on: E7.2, E2.6, E3.3. Refs: PRD FR-6.5, §8.5.
 
 ### STORY-E7.6 — Visibility Rules CRUD
 As Admin, I want to configure organization-wide visibility and per-org defaults.
@@ -553,7 +577,7 @@ AC:
 - Supported values: `SINGLE`, `DUAL_MANAGER`, `HR_GATE`.
 - Mutation emits audit event.
 
-Depends on: E7.1, E7.2. Refs: PRD FR-6.7, §8.7.
+Depends on: E7.1, E7.2, E2.6, E3.3. Refs: PRD FR-6.7, §8.7.
 
 ### STORY-E7.8 — Change-impact preview endpoint
 As Admin, I want to see "this will affect N employees" before saving any configuration change.
@@ -579,14 +603,16 @@ Depends on: E7.1–E7.5, E3.3. Refs: PRD FR-6.9, FR-6.10; Arch §5.4.
 As Admin/HR, I want to view and transition my organization's rollout mode.
 
 AC:
+- Migration creates `rollout_mode_transitions(id UUID PK, organization_id UUID FK, actor_id UUID FK, from_mode promotion_mode_enum, to_mode promotion_mode_enum, rationale TEXT NULL, transitioned_at TIMESTAMPTZ NOT NULL, CHECK (from_mode <> 'CALIBRATION' OR char_length(rationale) >= 100))` with RLS, append-only.
+- Migration creates `bootstrap_eligibility_snapshots(id UUID PK, organization_id UUID FK, transition_id UUID FK to rollout_mode_transitions, employee_id UUID FK, level_id UUID FK, score INT, readiness_pct NUMERIC, promotion_eligible BOOL, calibration_flag_open BOOL, occurred_at TIMESTAMPTZ NOT NULL)` with RLS, append-only, partitioned by `RANGE (occurred_at)` quarterly; unique `(transition_id, employee_id)`.
 - `GET /v1/organizations/me/promotion-mode` returns `{ promotion_mode, changed_at, changed_by }`.
-- `PATCH` transitions the mode; `CALIBRATION → ACTIVE` requires `rationale` ≥100 chars and triggers synchronous Bootstrap Eligibility Snapshot capture in the same transaction (see E13 for snapshot content — table is provisioned here so the transition is atomic).
+- `PATCH` transitions the mode; `CALIBRATION → ACTIVE` requires `rationale` ≥100 chars and triggers synchronous Bootstrap Eligibility Snapshot capture (one row per employee in the org) in the same transaction.
 - `ACTIVE → CALIBRATION` is allowed with rationale; does not re-snapshot.
 - Emits `organization.promotion_mode.changed` realtime event via outbox; audit event captures actor, rationale, from/to.
 
-Depends on: E7.1, E13.2 (table provisioning is owned by this story for transactional atomicity — see note below). Refs: PRD FR-7.14, §8.9, §6.9; Arch §5.4, §6.2.
+Depends on: E7.1, E6.2a, E2.5, E2.6, E3.3. Refs: PRD FR-7.14, §8.9, §6.9; Arch §5.4, §6.2 (`rollout_mode_transitions`, `bootstrap_eligibility_snapshots`).
 
-> Note: `bootstrap_eligibility_snapshots` and `rollout_mode_transitions` tables are created in this story (not E13) because the transition must be atomic with the snapshot capture. E13's Calibration Flag and Promotion endpoints consume them.
+> Note: `bootstrap_eligibility_snapshots` and `rollout_mode_transitions` tables are owned by this story (not E13) because the CALIBRATION→ACTIVE transition must capture the snapshot atomically with the mode change. E13's Calibration Flag and Promotion endpoints consume the snapshots but do not own them.
 
 ### STORY-E7.11 — Admin Settings UI for the full configuration surface
 As Admin, I want 2D forms for every configuration dimension so I can configure my org from the app.
@@ -597,7 +623,7 @@ AC:
 - All forms are keyboard-navigable (NFR-10.4) and screen-reader labeled (NFR-10.5).
 - Admin-only; redirect non-Admins to `/map`.
 
-Depends on: E7.1–E7.10. Refs: PRD FR-6.1–6.10; Arch §4.2.
+Depends on: E7.1, E7.2, E7.3, E7.4, E7.5, E7.6, E7.7, E7.8, E7.9, E7.10. Refs: PRD FR-6.1–6.10; Arch §4.2.
 
 ---
 
@@ -639,12 +665,13 @@ Depends on: E8.2. Refs: Arch §9.2, AR-5; PRD FR-4.3.
 As a Manager, I want to approve or reject evidence with a written reason.
 
 AC:
+- Migration creates `approval_records(id UUID PK, organization_id UUID FK, evidence_id UUID FK NULL, promotion_record_id UUID FK NULL, actor_id UUID FK, decision approval_decision_enum('APPROVED'|'REJECTED'), reason TEXT NOT NULL, decided_at TIMESTAMPTZ NOT NULL)` with RLS, `CHECK (evidence_id IS NOT NULL OR promotion_record_id IS NOT NULL)`, and `CHECK (NOT (evidence_id IS NOT NULL AND promotion_record_id IS NOT NULL))` so each row references exactly one parent. Append-only at the DB role level (no UPDATE/DELETE grant).
 - `PATCH /v1/evidence/:id/approve` requires `reason` ≥10 chars; `PATCH /v1/evidence/:id/reject` requires `reason` ≥20 chars.
 - Both endpoints call `SelfApprovalGuard.ensureNotSelf(actor, evidence.employee.user_id)`; self-approval returns 403.
 - On success, `approval_records` row is written with actor, decision, reason, timestamp.
 - Approve transitions state → APPROVED and enqueues `scoring.recalc-employee` via outbox; Reject transitions → REJECTED. Both emit audit events.
 
-Depends on: E8.1, E4.2. Refs: PRD FR-4.5, FR-4.6, §6.3, §9.2.
+Depends on: E8.1, E4.2, E2.5, E2.6, E3.3. Refs: PRD FR-4.5, FR-4.6, §6.3, §9.2; Arch §6.2 (`approval_records`).
 
 ### STORY-E8.5 — Admin/HR override approval path
 As an Admin, I want to approve or reject evidence for any employee (for gaps or escalations).
@@ -787,18 +814,18 @@ AC:
 - Response headers include `X-FCM-Config-Version`; cache-key is `(organization_id, config_version)`.
 - Unit test with a fixed configuration asserts deterministic output.
 
-Depends on: E7.1–E7.3. Refs: Arch §5.1 mapprojection, §13.2; Epics E10.
+Depends on: E7.1, E7.2, E7.3. Refs: Arch §5.1 mapprojection, §13.2; Epics E10.
 
 ### STORY-E10.2 — `GET /v1/map/employees` server-shaped payload
 As a frontend developer, I want the map node data shaped server-side with RBAC applied so the client is never trusted to hide data.
 
 AC:
-- Endpoint returns `{ nodes: [...] }` matching the `MapNode` contract (Arch §13.3): `employee_id` (nullable), `track_id`, `level_id`, `band_position` (0–1), `score` (nullable), `readiness_pct` (nullable), `promotion_eligible` (nullable), `eligibility_state`, `at_risk` (nullable), `anonymized`.
+- Endpoint returns `{ nodes: [...] }` matching the `MapNode` contract (Arch §13.3): `employee_id` (nullable), `track_id`, `level_id`, `band_position` (0–1), `score` (nullable), `readiness_pct` (nullable), `promotion_eligible` (nullable), `eligibility_state` ∈ `{'ELIGIBLE'|'NOT_ELIGIBLE'|'PENDING_CALIBRATION'|'CALIBRATION_HOLD'}` (canonical enum pinned in Arch §13.3 — no other values permitted), `at_risk` (nullable), `anonymized`.
 - Filter scope: Managers default to "My Team" (FR-2.15); `?scope=org` toggles off the default; ADMIN sees all.
 - Values come from `employee_current_snapshot`; no recomputation.
-- Response includes headers `X-FCM-Rollout-Mode` and `X-FCM-Visibility-Scope`.
+- Response includes headers `X-FCM-Rollout-Mode`, `X-FCM-Visibility-Scope`, and `Cache-Control: no-store, private`. **The endpoint MUST NOT be placed behind any shared cache (CDN, Redis cache layer, NestJS `CacheInterceptor`, reverse-proxy response cache).** Per-request memoization within a single handler invocation is permitted; cross-request caching is forbidden — see Arch §13.3 rationale (cross-viewer payload poisoning is a privacy incident). A CI assertion in EPIC-16 verifies the response headers and the absence of cache decorators on this controller.
 
-Depends on: E9.4, E10.1, E2.6. Refs: Arch §13.3; PRD FR-2.15, §14.5.
+Depends on: E9.4, E10.1, E2.6. Refs: Arch §13.3 (pinned `eligibility_state` enum + no-cache rule); PRD FR-2.15, §14.5.
 
 ### STORY-E10.3 — Server-side anonymization pass
 As a security-minded engineer, I want anonymization enforced server-side so the client never receives identity for peers it cannot see.
@@ -898,11 +925,13 @@ As a user, I want clear visual signals for promotion eligibility and readiness t
 
 AC:
 - Emissive pulse shader uniform drives a subtle pulse; binding is `promotion_eligible === true`, never `readiness_pct`.
+- **Contract test (Vitest + react-three-test-renderer):** a unit test reads the actual `uniforms` object on the pulse `ShaderMaterial` at mount time and asserts `uniforms.uPulseTrigger.value` is derived from a `promotion_eligible` selector and that no path in the source binds `readiness_pct` to `uPulseTrigger`. The test imports the production shader/material and fails if the binding source field is changed by future refactors. A second snapshot test renders one eligible + one ineligible + one high-readiness-but-ineligible node and asserts the pulse uniform value is `1.0`, `0.0`, and `0.0` respectively.
+- **Lint rule (eslint-plugin-fcm or equivalent local rule):** scans the 3D rendering package and fails the build if any shader or material assignment of the form `uPulseTrigger = ...readiness...` appears in source. This is defense-in-depth against the contract-test failure mode where a developer adds a new binding path the test doesn't cover.
 - When `prefers-reduced-motion` is set, pulse is replaced with a static ring halo.
-- Per-instance opacity + emissive blended from `readiness_pct`; clamped at 40% opacity minimum so 0% nodes remain clickable.
+- Per-instance opacity + emissive blended from `readiness_pct`; clamped at 40% opacity minimum so 0% nodes remain clickable (and an OWN_ONLY peer at readiness=0% still renders with the same opacity floor — anonymization does not bypass the floor).
 - Single bloom post-processing pass on the emissive channel.
 
-Depends on: E11.3. Refs: PRD §14.3, FR-2.6, FR-7.2; Arch §4.3 rules 7–10.
+Depends on: E11.3. Refs: PRD §14.3, FR-2.6, FR-7.2 (Promotion-Ready signal MUST bind to Eligibility, never Readiness — failure here is a PRD §7.1 product-credibility failure); Arch §4.3 rules 7–10.
 
 ### STORY-E11.8 — Client performance instrumentation and end-of-session beacon
 As an operator, I want 3D performance telemetry so regressions are caught early.
@@ -981,7 +1010,7 @@ AC:
 - Employee on own panel: "Submit Evidence" button opens the evidence-submission flow (wired to E8.2).
 - Manager on report's panel: "Approve" / "Reject" actions on any pending evidence item inline (wired to E8.4).
 - "Initiate Promotion" button rendered but its wiring is completed in E13.8; when the org is in `CALIBRATION`, the button is suppressed and replaced with the label "Eligible — Pending Calibration" (per FR-3.16).
-- "Flag for Calibration" action visible to HR only on nodes in `ELIGIBLE` state; wired in E13.6 (UI stub here).
+- "Flag for Calibration" action visible to HR only on nodes in `ELIGIBLE` state; wired in E13.5 (UI stub here).
 - "View Full Profile" link for Manager and Admin; wired in E15.3.
 
 Depends on: E12.4, E8.2, E8.4. Refs: PRD FR-3.9, FR-3.10, FR-3.11, FR-3.15, FR-3.16; Arch §5.4.
@@ -990,13 +1019,14 @@ Depends on: E12.4, E8.2, E8.4. Refs: PRD FR-3.9, FR-3.10, FR-3.11, FR-3.15, FR-3
 As a Manager, I want a Development Notes tab so I can capture private coaching context next to scoring data and optionally share specific notes.
 
 AC:
+- Migration creates `development_notes(id UUID PK, organization_id UUID FK, manager_id UUID FK, employee_id UUID FK, body TEXT NOT NULL, visibility note_visibility_enum('PRIVATE'|'SHARED_WITH_EMPLOYEE') NOT NULL DEFAULT 'PRIVATE', created_at TIMESTAMPTZ NOT NULL, shared_at TIMESTAMPTZ NULL)` with RLS. A `BEFORE UPDATE` trigger rejects any transition from `SHARED_WITH_EMPLOYEE` back to `PRIVATE` (one-way share enforced at the DB level).
 - Tab visible only to Manager (on direct report) and HR.
 - `GET/POST /v1/employees/:id/development-notes` implemented with `visibility enum(PRIVATE, SHARED_WITH_EMPLOYEE)`, default `PRIVATE`.
 - `PATCH /v1/development-notes/:id/share` transitions `PRIVATE → SHARED_WITH_EMPLOYEE`; reverse transition is rejected (DB trigger + domain guard).
 - Employee viewing own panel sees only shared notes (never PRIVATE); `developmentnotes` RBAC per Arch §5.1.
 - Each note create and share emits an audit event via outbox.
 
-Depends on: E12.4, E3.3. Refs: PRD §5.2 Development Notes, FR-3.14; Arch §5.1 developmentnotes, §5.4.
+Depends on: E6.2a, E12.4, E2.5, E2.6, E3.3. Refs: PRD §5.2 Development Notes, FR-3.14; Arch §5.1 developmentnotes, §5.4, §6.2 (`development_notes`).
 
 ### STORY-E12.8 — Peer-visibility stripping inside the panel
 As an Employee viewing a peer node I am permitted to see, I want Score, ETA, Confidence, and Development Notes never to appear.
@@ -1036,11 +1066,11 @@ Depends on: E12.2, E12.4. Refs: PRD NFR-10.4, NFR-10.5; Arch §4.6.
 As a platform engineer, I want a promotion records table with a strict state machine so every step is auditable.
 
 AC:
-- Migration creates `promotion_records(id, organization_id, employee_id, from_level_id, to_level_id, state enum, initiated_at, completed_at)` with state transitions: `RECOMMENDED → IN_REVIEW → APPROVED | REJECTED | CALIBRATION_HOLD`; `CALIBRATION_HOLD → IN_REVIEW | REJECTED`.
+- Migration creates `promotion_records(id, organization_id, employee_id, from_level_id, to_level_id, state enum, workflow_at_initiate approval_workflow_enum NOT NULL, initiated_at, completed_at)` with state transitions: `RECOMMENDED → IN_REVIEW → APPROVED | REJECTED | CALIBRATION_HOLD | REJECTED_AT_COMMIT`; `CALIBRATION_HOLD → IN_REVIEW | REJECTED`; `APPROVED → REJECTED_AT_COMMIT` (commit-time gate failure). `workflow_at_initiate` snapshots the workflow at initiate so mid-flight config changes do not re-evaluate in-flight promotions.
 - Domain-layer state machine rejects illegal transitions.
 - Append-only for terminal states.
 
-Depends on: E6.2, E2.6. Refs: Arch §6.2.
+Depends on: E6.2, E6.2a, E2.6. Refs: Arch §6.2, §5.4.
 
 ### STORY-E13.2 — `promotion_recommendations` append-only table with narrative check
 As a platform engineer, I want a separate append-only table for the Manager's Performance Narrative so the narrative is always immutable.
@@ -1050,7 +1080,7 @@ AC:
 - Table has `INSERT`-only grant; `UPDATE` and `DELETE` revoked for the app role.
 - Unit test asserts a 199-char narrative is rejected by DB; 200+ accepted.
 
-Depends on: E13.1. Refs: PRD FR-7.10, FR-7.11, §6.5; Arch §5.4, §6.2.
+Depends on: E13.1, E2.6. Refs: PRD FR-7.10, FR-7.11, §6.5; Arch §5.4, §6.2.
 
 ### STORY-E13.3 — `calibration_flags` table with partial unique open-flag index
 As a platform engineer, I want calibration flags with a DB-level guarantee of at most one open flag per employee.
@@ -1060,74 +1090,78 @@ AC:
 - Partial unique index on `(employee_id) WHERE state = 'OPEN'` enforces the single-open-flag invariant.
 - A 409 `CALIBRATION_FLAG_ALREADY_OPEN` structured error is returned on concurrent open-flag conflict.
 
-Depends on: E6.2. Refs: PRD FR-3.15, FR-7.12, §6.8; Arch §5.4, §6.2, AR-14.
+Depends on: E6.2, E6.2a, E2.6. Refs: PRD FR-3.15, FR-7.12, §6.8; Arch §5.4, §6.2, AR-14.
 
 ### STORY-E13.4 — `POST /v1/employees/:id/promotions` with four independent gates
 As a Manager, I want to initiate a promotion knowing the server enforces Eligibility, Rollout Mode, Calibration Flag absence, and Performance Narrative presence.
 
 AC:
-- Endpoint re-verifies, in a single transaction: (a) `promotion_eligible = true` on the latest snapshot; (b) `organization.promotion_mode = ACTIVE`; (c) no open `calibration_flags` for the employee; (d) `performance_narrative` ≥200 chars in the body.
+- Endpoint re-verifies, in a single transaction: (a) `promotion_eligible = true` on the latest snapshot; (b) `organization.promotion_mode = ACTIVE`; (c) no open `calibration_flags` for the employee; (d) `performance_narrative` ≥200 chars (and ≥200 non-whitespace chars after `string.trim().replace(/\s+/g, ' ')` to prevent whitespace gaming) in the body.
 - Structured error codes on rejection: `PROMOTION_NOT_ELIGIBLE` (+ failing_condition), `ORG_IN_CALIBRATION_MODE`, `CALIBRATION_FLAG_OPEN` (+ flag_id), `NARRATIVE_TOO_SHORT`.
-- On success, inserts `promotion_records` (state `RECOMMENDED`), inserts `promotion_recommendations` (append-only), emits outbox events (audit + notification + manager-team realtime).
+- On success, inserts `promotion_records` (state `RECOMMENDED`, `workflow_at_initiate` snapshotted from `organization.approval_workflow_default` or the per-level override at initiate time so a mid-flight workflow config change does not re-evaluate this promotion), inserts `promotion_recommendations` (append-only), emits outbox events (audit + notification + manager-team realtime).
 
-Depends on: E13.1, E13.2, E13.3, E7.10, E9.5. Refs: PRD FR-7.3, FR-7.4, FR-7.10, FR-7.12, FR-7.13, §6.5; Arch §5.4, AR-12.
+Depends on: E13.1, E13.2, E13.3, E6.2a, E6.2b, E7.10, E9.5, E2.5, E2.6, E3.3. Refs: PRD FR-7.3, FR-7.4, FR-7.10, FR-7.12, FR-7.13, §6.5; Arch §5.4, AR-12, §6.2 (`promotion_records.workflow_at_initiate`).
 
-### STORY-E13.5 — `POST /v1/promotions/:id/recommend` (if workflow uses a separate recommend step)
-As a Manager in a workflow that separates "initiate" from "recommend", I want an explicit recommend endpoint.
-
-AC:
-- For organizations whose workflow is `DUAL_MANAGER` or `HR_GATE`, the initial `POST /employees/:id/promotions` creates the record in `RECOMMENDED` state and this endpoint is not needed; this story covers workflows that may later require an explicit re-recommend after a calibration release (the endpoint exists for API completeness and audit trail).
-- Behavior: transitions back to `IN_REVIEW` after `CALIBRATION_HOLD → RESOLVED_RELEASE`; requires `re_recommendation_reason` ≥40 chars.
-- Audit event captures the re-recommend context.
-
-Depends on: E13.4, E13.6. Refs: Arch §13.2; PRD §6.5.
-
-> Note: small-correction flag — the epic lists both initiate and recommend endpoints; this story models recommend as a post-release transition rather than an extra upfront step, keeping the common path (no calibration) to one call. This is an API-shape clarification only; the workflow semantics in PRD §6.5 are preserved.
-
-### STORY-E13.6 — HR calibration-flag endpoints (open, resolve)
+### STORY-E13.5 — HR calibration-flag endpoints (open, resolve)
 As HR, I want to open a calibration flag on any eligible employee or pending promotion, and resolve it with a release or reject.
 
 AC:
-- `POST /v1/employees/:id/calibration-flags` (HR only): opens a flag with `reason` ≥40 chars; blocks any in-progress promotion from advancing.
-- `PATCH /v1/calibration-flags/:id/resolve` (HR only): transitions to `RESOLVED_RELEASE` (lifts the hold; workflow can resume via E13.5 if required) or `RESOLVED_REJECT` (persists as organizational context; does not lift the underlying eligibility computation).
-- Both actions emit audit + notification events.
+- `POST /v1/employees/:id/calibration-flags` (ADMIN role, treated as HR per PRD §4.2): opens a flag with `reason` ≥40 chars (matches DB CHECK on `calibration_flags.open_reason`); blocks any in-progress promotion from advancing.
+- `PATCH /v1/calibration-flags/:id/resolve` (ADMIN role): transitions to `RESOLVED_RELEASE` (lifts the hold; workflow resumes via the re-recommend transition in E13.6) or `RESOLVED_REJECT` (persists as organizational context; does not lift the underlying eligibility computation).
+- Concurrent-flag race: the partial unique index on `calibration_flags(employee_id) WHERE state='OPEN'` is the canonical race resolver — two concurrent HR opens result in exactly one OPEN row; the loser receives `409 CALIBRATION_FLAG_ALREADY_OPEN` with the existing flag id.
+- Both actions emit audit + notification events via outbox.
 - Integration test asserts approval endpoints return `CALIBRATION_FLAG_OPEN` while a flag is open.
 
-Depends on: E13.3. Refs: PRD FR-3.15, FR-7.12, §6.8; Arch §5.4.
+Depends on: E13.3, E2.5, E2.6, E3.3. Refs: PRD FR-3.15, FR-7.12, §6.8; Arch §5.4, §6.2 (`calibration_flags`).
+
+### STORY-E13.6 — `POST /v1/promotions/:id/recommend` (re-recommend after calibration release)
+As a Manager whose pending promotion was placed on calibration hold and then released, I want a re-recommend endpoint so the approval chain can resume cleanly.
+
+AC:
+- `POST /v1/promotions/:id/recommend` is accepted only when the promotion is currently in state `CALIBRATION_HOLD` with the linked flag transitioned to `RESOLVED_RELEASE` (per E13.5); any other source state returns `INVALID_TRANSITION`.
+- Request body requires `re_recommendation_reason` ≥40 chars; rejected with `REASON_TOO_SHORT` otherwise.
+- On success, transitions the record back to `IN_REVIEW` so the approval chain resumes from the post-recommendation state (workflow is read from `promotion_records.workflow_at_initiate` — see E13.4 — so a mid-flight config change does NOT re-evaluate the workflow).
+- For `SINGLE` mode this endpoint is rarely used (release+approve typically collapses); the endpoint is still accepted to keep API shape consistent across workflows.
+- Audit event captures the re-recommend context including the resolved flag id.
+
+Depends on: E13.4, E13.5, E2.5, E2.6, E3.3. Refs: Arch §13.2, §5.4; PRD §6.5.
 
 ### STORY-E13.7 — Approval workflow execution (`SINGLE` / `DUAL_MANAGER` / `HR_GATE`)
 As a workflow engine, I want to execute the approval chain honoring per-org / per-level configuration.
 
 AC:
-- `PATCH /v1/promotions/:id/approve` and `/reject` advance the state machine per workflow; self-approval rejected via E2.5 guard.
-- In `SINGLE`, the Manager's recommendation completes the promotion.
-- In `DUAL_MANAGER`, a second Manager or Admin must co-approve.
-- In `HR_GATE`, Admin/HR must counter-sign.
+- `PATCH /v1/promotions/:id/approve` and `/reject` advance the state machine per workflow; self-approval rejected via the E2.5 `SelfApprovalGuard`.
+- In `SINGLE`, the Manager's recommendation completes the promotion in one step (see PRD §6.5: not considered self-approval because the recommender and the promotion subject are distinct identities; the guard still rejects the rare self-recommendation edge case).
+- In `DUAL_MANAGER`, a second Manager or Admin must co-approve; the co-approver cannot be the recommender (`SelfApprovalGuard`).
+- In `HR_GATE`, Admin/HR must counter-sign; HR approver cannot be the recommender.
+- **Mid-flight workflow config change:** in-flight promotions are governed by `promotion_records.workflow_at_initiate` snapshotted at E13.4 commit time, not by current org/level config. New promotions initiated after the config change use the new workflow.
 - Each action requires a `reason` field on reject; rejection emits notification to the initiating Manager with reason.
 
-Depends on: E13.4, E7.7. Refs: PRD FR-7.5, FR-7.6, §6.5, §8.7.
+Depends on: E13.4, E13.6, E7.7, E2.5, E2.6, E3.3. Refs: PRD FR-7.5, FR-7.6, §6.5, §8.7; Arch §5.4.
 
 ### STORY-E13.8 — Promotion commit: level change, score archival, node reposition, notifications
-As a system, I want a completed promotion to atomically commit the level change and fan out.
+As a system, I want a completed promotion to atomically commit the level change and fan out, with all four gates re-verified at commit time so a lapsed eligibility cannot ship a stale promotion.
 
 AC:
-- On final approval, a single transaction: updates `employees.level_id`, resets level-scoped score inputs (next recalc will compute against new level), archives previous snapshot via a `promotion.committed` triggering event, inserts outbox rows for audit + notification + realtime `promotion.completed`.
+- **Commit-time re-verification (single transaction, before any mutation):** (a) latest snapshot `promotion_eligible = true`; (b) `organization.promotion_mode = ACTIVE`; (c) no open `calibration_flags` for the employee (`state = 'OPEN'`); (d) approval-chain state is the terminal `APPROVED` for the workflow snapshotted in `promotion_records.workflow_at_initiate`. Any failure rejects with `PROMOTION_NOT_ELIGIBLE` / `ORG_IN_CALIBRATION_MODE` / `CALIBRATION_FLAG_OPEN` / `APPROVAL_CHAIN_INCOMPLETE`, writes an audit event capturing which gate failed, and transitions the record to `REJECTED_AT_COMMIT` so HR can investigate.
+- On successful re-verification, a single transaction: updates `employees.level_id`, resets level-scoped score inputs (next recalc will compute against new level), archives previous snapshot via a `promotion.committed` triggering event, inserts outbox rows for audit + notification + realtime `promotion.completed`.
 - `promotion.completed` event triggers a 3D canvas node-reposition animation client-side.
 - Previous-level score remains in `score_snapshots` history.
-- Integration test covers the full initiate → approve → commit → node-reposition path.
+- Integration test covers the full initiate → approve → commit → node-reposition path AND a commit-time-lapse path: simulate (i) a calibration flag opened after final approval but before commit, (ii) a rollout mode flip CALIBRATION between approval and commit, (iii) an evidence retroactive rejection between approval and commit that flips the snapshot's `promotion_eligible` to false. Each must reject at commit with the correct structured error.
 
-Depends on: E13.7, E9.5, E5.4. Refs: PRD FR-7.7, FR-7.8, FR-7.9, §6.5; Arch §5.4.
+Depends on: E13.7, E9.5, E5.4, E2.5, E2.6, E3.3. Refs: PRD FR-7.7, FR-7.8, FR-7.9, §6.5; Arch §5.4 (Promotion commit transaction includes commit-time re-verification of all four gates).
 
 ### STORY-E13.9 — Track Transfer flow
 As Admin, I want to transfer an employee to a different track with full audit integrity.
 
 AC:
-- `POST /v1/employees/:id/track-transfers` (ADMIN only) accepts `to_track_id`, `target_level_id`, `reason` ≥40 chars.
+- Migration creates `track_transfers(id UUID PK, organization_id UUID FK, employee_id UUID FK, from_track_id UUID FK, to_track_id UUID FK, from_level_id UUID FK, to_level_id UUID FK, reason TEXT NOT NULL CHECK (char_length(reason) >= 40), transferred_by UUID FK, transferred_at TIMESTAMPTZ NOT NULL)` with RLS, append-only.
+- `POST /v1/employees/:id/track-transfers` (ADMIN only) accepts `to_track_id`, `target_level_id`, `reason` ≥40 chars; rejected with `PROMOTION_IN_FLIGHT` if the employee has a `promotion_records` row in any non-terminal state (`RECOMMENDED` / `IN_REVIEW` / `CALIBRATION_HOLD`).
 - In one transaction: inserts `track_transfers` row, updates employee's `track_id` and `level_id`, resets score for the new track to 0, preserves all prior evidence and snapshots in audit history.
 - Admin may optionally carry over specific evidence via a separate endpoint `PATCH /v1/evidence/:id/reassociate-to-track` (logged as manual re-association).
 - Notification to employee and manager.
 
-Depends on: E13.8, E8.1. Refs: PRD §14.6.
+Depends on: E6.2a, E13.8, E8.1, E2.5, E2.6, E3.3. Refs: PRD §14.6; Arch §6.2 (`track_transfers`), §5.4.
 
 ### STORY-E13.10 — Initiate Promotion UI wiring inside the Detail Panel
 As a Manager, I want the "Initiate Promotion" action to be enabled exactly when eligible, not in calibration mode, and not flagged, and to open a Performance Narrative composition modal.
@@ -1191,11 +1225,12 @@ Depends on: E14.1, E5.5. Refs: PRD FR-9.2, FR-9.3.
 As a Manager, I want a Pending-Reviews badge and a Stale-Reviews section (> 7 days) so I can act on engagement nudges.
 
 AC:
-- Dashboard widget "Pending Reviews" shows the count of evidence in `PENDING_APPROVAL` for the manager's reports.
+- Widgets are mounted into the E15.1 dashboard slots `manager.pending-reviews` and `manager.stale-reviews`; this story owns the widget components but not the route shell.
+- Widget "Pending Reviews" shows the count of evidence in `PENDING_APPROVAL` for the manager's reports.
 - Widget "Stale Reviews" lists evidence pending > 7 days, with elevated visual emphasis (warning color, aging indicator).
 - Both widgets refresh on realtime `evidence.*` events.
 
-Depends on: E14.3, E8.4, E15.1. Refs: PRD FR-12.1, FR-12.2.
+Depends on: E14.3, E8.4, E15.1, E5.5. Refs: PRD FR-12.1, FR-12.2.
 
 ### STORY-E14.5 — Admin report: managers ranked by average evidence review latency
 As Admin, I want an organization report ranking managers by review latency.
@@ -1211,15 +1246,16 @@ Depends on: E8.8, E14.3. Refs: PRD FR-12.3, FR-12.4.
 
 ## EPIC-15 — 2D Deep Views
 
-### STORY-E15.1 — Dashboard (2D) with role-scoped KPIs
-As a user, I want a summary dashboard with role-scoped KPIs, quick links, and a notifications preview.
+### STORY-E15.1 — Dashboard (2D) with role-scoped KPIs and widget slots
+As a user, I want a summary dashboard with role-scoped KPIs, quick links, a notifications preview, and named slots that other epics can fill.
 
 AC:
-- `/dashboard` route renders role-scoped KPIs: Employee (own progression summary), Manager (team summary + pending-review widgets from E14.4), Admin (org-wide KPIs).
+- `/dashboard` route renders role-scoped KPIs: Employee (own progression summary), Manager (team summary), Admin (org-wide KPIs).
+- The Manager dashboard exposes two named widget slots (`<DashboardSlot name="manager.pending-reviews" />` and `<DashboardSlot name="manager.stale-reviews" />`) that render placeholder skeletons in this story and are filled by STORY-E14.4 when that lands; the slot contract is part of `domain-contracts` so E14.4 can build against it without touching this route.
 - Quick links to Career Map, Analytics (Admin/Manager), Settings (Admin).
 - Notifications preview block (last 5).
 
-Depends on: E9.4, E14.4. Refs: PRD FR-11.1–11.3.
+Depends on: E9.4. Refs: PRD FR-11.1–11.3.
 
 ### STORY-E15.2 — Analytics (2D): distribution, trends, at-risk
 As Manager/Admin, I want distribution charts, trend lines, and at-risk lists.
@@ -1258,10 +1294,10 @@ As HR, I want a single surface listing all employees currently in `ELIGIBLE` or 
 AC:
 - `/analytics/calibration-queue` (HR only) lists: Eligible without recommendation; Recommended awaiting approval; Currently flagged; Recently promoted (last 30 days).
 - Each row exposes eligibility date, manager, track, level transition, recommendation-narrative excerpt.
-- One-click actions: open Detail Panel; open Calibration Flag resolution modal (from E13.6).
+- One-click actions: open Detail Panel; open Calibration Flag resolution modal (from E13.5).
 - Filterable by track, team, manager, level transition.
 
-Depends on: E13.3, E13.4, E13.6. Refs: PRD FR-10.5, §6.8.
+Depends on: E13.3, E13.4, E13.5. Refs: PRD FR-10.5, §6.8.
 
 ### STORY-E15.6 — Bootstrap Eligibility Snapshot explorer (2D, HR)
 As HR, I want to view the immutable snapshot captured at each `CALIBRATION → ACTIVE` transition and compare against current state.
@@ -1443,7 +1479,7 @@ E1.1 → E1.2 → E1.4 → E2.1 → E2.2 → E2.4 → E2.5 → E2.6
                                       E12.1 → E12.4 → E12.5 → E12.6 → E12.9
                                                                               │
                                                                               ▼
-                                      E13.1 → E13.2 → E13.3 → E13.4 → E13.7 → E13.8 → E13.10
+                                      E13.1 → E13.2 → E13.3 → E13.4 → E13.5 → E13.6 → E13.7 → E13.8 → E13.10
                                                                                                     │
                                                                                                     ▼
                                                                               E14.1 → E14.2 → E14.3

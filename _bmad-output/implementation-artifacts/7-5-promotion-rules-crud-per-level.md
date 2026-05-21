@@ -28,6 +28,8 @@ I want TBD.
 ### Dependencies
 
 - E7.2
+- E2.6
+- E3.3
 
 ### References
 

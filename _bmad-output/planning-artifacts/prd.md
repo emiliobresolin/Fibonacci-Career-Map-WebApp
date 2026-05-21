@@ -147,6 +147,8 @@ FCM is **not** a Fibonacci novelty app. It is **not** a 3D visualization dashboa
 
 Roles are assigned per Organization. A user can hold exactly one of {Employee, Manager, Admin} within an Organization. A Manager is always also an Employee (has their own progression). Admin / HR is a distinct role and does not participate as an Employee in the progression model within their own Admin capacity (though an Admin may also hold an Employee profile if they are simultaneously an IC, in which case they receive a separate Employee role assignment).
 
+**HR vs Admin clarification:** "HR" and "Admin" are not separate roles in the role enum (`EMPLOYEE | MANAGER | ADMIN`). Wherever the PRD or stories say "HR only", read it as `ADMIN` role unless the context explicitly distinguishes (e.g., a future `IS_HR` flag on `role_assignments`). For MVP, every Admin has full HR powers. If an org needs to separate Admin and HR responsibilities operationally, it does so through distinct user accounts both assigned the ADMIN role — there is no in-system role-level distinction in MVP. A V2 enhancement may introduce an `HR` sub-role or `is_hr` boolean.
+
 ---
 
 ## 5. 3D-First Interaction Model
@@ -322,9 +324,9 @@ The Full Profile is a dedicated 2D page, intentionally outside the 3D context, d
    - A confirmation: *"I recommend this employee for promotion. I understand that Eligibility is a precondition and that this recommendation is my judgment as their manager."*
 4. The Manager submits the recommendation. A PromotionRecord is created in `RECOMMENDED` state. Backend **re-verifies Promotion Eligibility and rollout mode** before accepting.
 5. **Approval workflow execution** per the organization's configured policy for the level:
-   - **Single sign-off:** Manager's recommendation completes the promotion when self-approval is not prohibited (Manager is the recommender, not a co-approver). In SINGLE mode the recommendation IS the approval.
-   - **Dual sign-off:** A second Manager or Admin must co-approve. The co-approver sees the recommendation narrative and the evidence; they record their own reason on approve/reject.
-   - **HR gate:** Admin/HR must review and approve. HR may also flag the record for calibration review (§6.8) before final decision.
+   - **Single sign-off:** In `SINGLE` mode, the Manager's recommendation **is** the approval — the recommendation transaction completes the promotion in one step. This is **not** considered self-approval because the Manager is recommending an *employee*, not approving their *own* promotion: the actor (`recommender_user_id`) and the subject (`employee.user_id`) are different identities, and `SelfApprovalGuard.ensureNotSelf(actor, subject)` is still evaluated and still rejects the rare case where a Manager attempts to recommend themselves (only possible when a Manager has set themselves as their own `manager_employee_id`, which the data model already forbids but the guard re-asserts as defense-in-depth). FR-7.6's prohibition on "approving your own initiated promotion" applies to multi-step workflows where the same actor would otherwise appear as both initiator and approver; in `SINGLE` mode there is only one actor (the recommender) and no separate approval step where self-approval could occur.
+   - **Dual sign-off (`DUAL_MANAGER`):** A second Manager or Admin must co-approve. The co-approver sees the recommendation narrative and the evidence; they record their own reason on approve/reject. The recommender cannot be the co-approver (`SelfApprovalGuard` rejects if `approver_id == recommender_id`).
+   - **HR gate (`HR_GATE`):** Admin/HR must review and approve. The recommender cannot be the HR approver even if they hold both roles in the same org (model forbids dual-role; guard re-asserts). HR may also flag the record for calibration review (§6.8) before final decision.
 6. **Calibration hold (optional at any approval step).** An Admin/HR may flag a pending promotion for calibration — see §6.8. While flagged, no further approval action is permitted until HR explicitly resolves the flag.
 7. On final approval:
    - Employee level is updated
@@ -388,7 +390,7 @@ The Full Profile is a dedicated 2D page, intentionally outside the 3D context, d
 4. HR can filter by track, team, manager, and level transition
 
 **Calibration Flag action:**
-1. From the Calibration Queue or a specific Employee Detail Panel, an Admin/HR can **flag a pending promotion for calibration review** with a mandatory reason (min 50 characters)
+1. From the Calibration Queue or a specific Employee Detail Panel, an Admin/HR can **flag a pending promotion for calibration review** with a mandatory reason (min 40 characters — canonical limit, matches FR-3.15 and the DB CHECK constraint in architecture §6.2 `calibration_flags.open_reason`)
 2. The flag places the PromotionRecord into a **`CALIBRATION_HOLD`** substate within whatever approval-workflow state it occupied
 3. While flagged, no approval action can proceed — the UI and API enforce the hold
 4. The manager who submitted the recommendation is notified
@@ -513,7 +515,7 @@ readiness_pct = score_progress_pct * (mandatory_completion_pct / 100)
 - Readiness % is NOT a promotion gate — it is a UI signal that gives employees and managers a graduated sense of overall progress
 - Readiness % reaches 100% only when score progress is 100% AND all mandatory requirements are complete (i.e., only when the employee is also Promotion-Eligible)
 - Readiness % is capped at 100%
-- Readiness % = 0% only when Score Progress = 0% (no points at current level) OR no mandatory requirements have been completed and there is at least one
+- Readiness % = 0% when the formula evaluates to 0 — i.e., Score Progress = 0% OR (mandatory_completion_pct = 0% AND total_mandatory_count ≥ 1). The two conditions are not alternatives; they are the only two ways the formula yields zero, and either one alone is sufficient.
 
 **Note:** A Readiness % of 99% does NOT mean "ready to promote." Promotion Eligibility (§7.5) is the authoritative check.
 
@@ -528,6 +530,8 @@ readiness_pct = score_progress_pct * (mandatory_completion_pct / 100)
 4. No active blocker conditions are flagged against the employee (per §8.5)
 
 **If any single condition fails, Promotion Eligibility is `NOT ELIGIBLE` — regardless of how high Readiness % is.**
+
+**Canonical `eligibility_state` enum (for all UI, API, and 3D-map payloads):** `ELIGIBLE` | `NOT_ELIGIBLE` | `PENDING_CALIBRATION` (org-level Rollout-Mode override per §8.9) | `CALIBRATION_HOLD` (HR-applied hold per §6.8). The enum and its override hierarchy (Rollout Mode > Calibration Hold > Eligibility) are pinned in architecture §13.3 and `domain-contracts`; no consumer may invent additional values.
 
 **Promotion Eligibility is:**
 - Computed at every score recalculation (§7.8)
@@ -561,6 +565,12 @@ else:
 - ETA is always paired with a Confidence indicator (§7.7)
 - If ETA is undefined (velocity = 0), display "Insufficient data" with Low confidence; never display "infinite" or "unknown"
 - Edge cases for new employees are specified in §14.4
+
+**Time and timezone canonical rules (apply to ETA, velocity_90d, min_time_at_level, evidence expiry, and Calibration Flag aging):**
+- All time arithmetic uses UTC server time. `NOW()` in formulas is `NOW() AT TIME ZONE 'UTC'`.
+- "90 days" means a fixed 90 × 86400 seconds rolling window — not a calendar quarter.
+- "1 month" in `min_time_at_level_months` and `expiry_months` means 30 days (fixed), not a calendar month, to keep eligibility deterministic across DST and leap years.
+- Client UIs render times in the viewer's browser timezone for display only; all server-side decisions (eligibility flips, expiry transitions, snapshot timestamps) use UTC.
 
 ### 7.7 Confidence Calculation
 
@@ -632,7 +642,7 @@ Per level:
 - **Minimum time at level:** required months at current level (nullable, in months)
 - **Manager approval required:** boolean (default true)
 - **HR counter-sign required:** boolean (default false)
-- **Active blocker check:** no active PIP or formal performance concern (boolean, default true — details logged in audit but PIP management is external)
+- **Active blocker check:** no active PIP or formal performance concern (boolean, default true — details logged in audit but PIP management is external). **Data model:** an "active blocker" is the presence of a row in the `employee_blockers` table (organization-scoped, FK to employee, with `kind ENUM('PIP','PERFORMANCE_CONCERN','HR_HOLD','OTHER')`, `reason TEXT NOT NULL CHECK (char_length(reason) >= 20)`, `opened_at`, `resolved_at` nullable, `opened_by`, `resolved_by`). A blocker is "active" when `resolved_at IS NULL`. Only Admin/HR may insert or resolve blockers; every state change writes an audit event. The eligibility evaluator (§7.5 condition 4) reads `EXISTS(SELECT 1 FROM employee_blockers WHERE employee_id = $1 AND resolved_at IS NULL)` and treats the predicate as the canonical blocker check. PIP management as a workflow remains external; FCM models only the blocker presence/absence for eligibility-gating purposes.
 
 ### 8.6 Visibility Rules
 
@@ -1113,7 +1123,7 @@ The Product Brief flagged 7 blockers requiring PRD-level resolution. Each is res
 - **Non-report nodes:** Display level and track context (for organizational awareness) but the Detail Panel shows limited info (level, track; no score, ETA, or evidence data) unless visibility rules allow more
 - **Default filter:** A "My Team" filter is applied by default on Manager login, showing only their reports; Manager can toggle off to see the full org map
 
-**For Employees with `OWN_ONLY` visibility:** The 3D map shows an aggregated, anonymized organizational structure (segment shapes and level bands visible, individual peer nodes hidden). The employee's own node is highlighted.
+**For Employees with `OWN_ONLY` visibility:** The 3D map shows an aggregated, anonymized organizational structure. Per §8.6 Map-Level Anonymization, peer nodes are **rendered as anonymous placeholder nodes** (correct in position to preserve the spatial shape, but stripped of identity, name, avatar, Readiness %, and ETA — and non-clickable). The employee's own node is highlighted. **This supersedes any earlier wording that suggested peer nodes are "hidden"** — they are rendered anonymously, not omitted, so the organizational shape remains visible.
 
 **For Admin/HR:** Full 3D map, all nodes, all detail panels.
 

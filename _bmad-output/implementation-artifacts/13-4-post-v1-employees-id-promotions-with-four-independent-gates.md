@@ -9,9 +9,9 @@ I want to initiate a promotion knowing the server enforces Eligibility, Rollout 
 
 ## Acceptance Criteria
 
-1. Endpoint re-verifies, in a single transaction: (a) `promotion_eligible = true` on the latest snapshot; (b) `organization.promotion_mode = ACTIVE`; (c) no open `calibration_flags` for the employee; (d) `performance_narrative` ≥200 chars in the body.
+1. Endpoint re-verifies, in a single transaction: (a) `promotion_eligible = true` on the latest snapshot; (b) `organization.promotion_mode = ACTIVE`; (c) no open `calibration_flags` for the employee; (d) `performance_narrative` ≥200 chars (and ≥200 non-whitespace chars after `string.trim().replace(/\s+/g, ' ')` to prevent whitespace gaming) in the body.
 2. Structured error codes on rejection: `PROMOTION_NOT_ELIGIBLE` (+ failing_condition), `ORG_IN_CALIBRATION_MODE`, `CALIBRATION_FLAG_OPEN` (+ flag_id), `NARRATIVE_TOO_SHORT`.
-3. On success, inserts `promotion_records` (state `RECOMMENDED`), inserts `promotion_recommendations` (append-only), emits outbox events (audit + notification + manager-team realtime).
+3. On success, inserts `promotion_records` (state `RECOMMENDED`, `workflow_at_initiate` snapshotted from `organization.approval_workflow_default` or the per-level override at initiate time so a mid-flight workflow config change does not re-evaluate this promotion), inserts `promotion_recommendations` (append-only), emits outbox events (audit + notification + manager-team realtime).
 
 ## Tasks / Subtasks
 
@@ -30,13 +30,18 @@ I want to initiate a promotion knowing the server enforces Eligibility, Rollout 
 - E13.1
 - E13.2
 - E13.3
+- E6.2a
+- E6.2b
 - E7.10
 - E9.5
+- E2.5
+- E2.6
+- E3.3
 
 ### References
 
 - PRD FR-7.3, FR-7.4, FR-7.10, FR-7.12, FR-7.13, §6.5
-- Arch §5.4, AR-12
+- Arch §5.4, AR-12, §6.2 (`promotion_records.workflow_at_initiate`)
 - [Source: planning-artifacts/stories.md — index entry for this story]
 
 ## Dev Agent Record

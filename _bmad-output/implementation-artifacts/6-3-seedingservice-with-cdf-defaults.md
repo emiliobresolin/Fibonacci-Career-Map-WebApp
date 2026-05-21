@@ -31,6 +31,7 @@ so that employees can appear on the map on day one.
 ### Dependencies
 
 - E6.2
+- E6.2a
 
 ### References
 

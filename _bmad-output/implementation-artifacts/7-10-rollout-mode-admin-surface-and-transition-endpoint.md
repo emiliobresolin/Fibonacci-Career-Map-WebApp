@@ -9,10 +9,12 @@ I want TBD.
 
 ## Acceptance Criteria
 
-1. `GET /v1/organizations/me/promotion-mode` returns `{ promotion_mode, changed_at, changed_by }`.
-2. `PATCH` transitions the mode; `CALIBRATION → ACTIVE` requires `rationale` ≥100 chars and triggers synchronous Bootstrap Eligibility Snapshot capture in the same transaction (see E13 for snapshot content — table is provisioned here so the transition is atomic).
-3. `ACTIVE → CALIBRATION` is allowed with rationale; does not re-snapshot.
-4. Emits `organization.promotion_mode.changed` realtime event via outbox; audit event captures actor, rationale, from/to.
+1. Migration creates `rollout_mode_transitions(id UUID PK, organization_id UUID FK, actor_id UUID FK, from_mode promotion_mode_enum, to_mode promotion_mode_enum, rationale TEXT NULL, transitioned_at TIMESTAMPTZ NOT NULL, CHECK (from_mode <> 'CALIBRATION' OR char_length(rationale) >= 100))` with RLS, append-only.
+2. Migration creates `bootstrap_eligibility_snapshots(id UUID PK, organization_id UUID FK, transition_id UUID FK to rollout_mode_transitions, employee_id UUID FK, level_id UUID FK, score INT, readiness_pct NUMERIC, promotion_eligible BOOL, calibration_flag_open BOOL, occurred_at TIMESTAMPTZ NOT NULL)` with RLS, append-only, partitioned by `RANGE (occurred_at)` quarterly; unique `(transition_id, employee_id)`.
+3. `GET /v1/organizations/me/promotion-mode` returns `{ promotion_mode, changed_at, changed_by }`.
+4. `PATCH` transitions the mode; `CALIBRATION → ACTIVE` requires `rationale` ≥100 chars and triggers synchronous Bootstrap Eligibility Snapshot capture (one row per employee in the org) in the same transaction.
+5. `ACTIVE → CALIBRATION` is allowed with rationale; does not re-snapshot.
+6. Emits `organization.promotion_mode.changed` realtime event via outbox; audit event captures actor, rationale, from/to.
 
 ## Tasks / Subtasks
 
@@ -20,6 +22,8 @@ I want TBD.
 - [ ] Task covering AC #2
 - [ ] Task covering AC #3
 - [ ] Task covering AC #4
+- [ ] Task covering AC #5
+- [ ] Task covering AC #6
 
 ## Dev Notes
 
@@ -30,12 +34,15 @@ I want TBD.
 ### Dependencies
 
 - E7.1
-- E13.2 (table provisioning is owned by this story for transactional atomicity — see note below)
+- E6.2a
+- E2.5
+- E2.6
+- E3.3
 
 ### References
 
 - PRD FR-7.14, §8.9, §6.9
-- Arch §5.4, §6.2
+- Arch §5.4, §6.2 (`rollout_mode_transitions`, `bootstrap_eligibility_snapshots`)
 - [Source: planning-artifacts/stories.md — index entry for this story]
 
 ## Dev Agent Record

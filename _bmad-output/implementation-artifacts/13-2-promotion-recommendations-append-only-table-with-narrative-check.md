@@ -29,6 +29,7 @@ so that the narrative is always immutable.
 ### Dependencies
 
 - E13.1
+- E2.6
 
 ### References
 

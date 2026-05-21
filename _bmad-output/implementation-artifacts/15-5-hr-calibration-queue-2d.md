@@ -11,7 +11,7 @@ I want TBD.
 
 1. `/analytics/calibration-queue` (HR only) lists: Eligible without recommendation; Recommended awaiting approval; Currently flagged; Recently promoted (last 30 days).
 2. Each row exposes eligibility date, manager, track, level transition, recommendation-narrative excerpt.
-3. One-click actions: open Detail Panel; open Calibration Flag resolution modal (from E13.6).
+3. One-click actions: open Detail Panel; open Calibration Flag resolution modal (from E13.5).
 4. Filterable by track, team, manager, level transition.
 
 ## Tasks / Subtasks
@@ -31,7 +31,7 @@ I want TBD.
 
 - E13.3
 - E13.4
-- E13.6
+- E13.5
 
 ### References
 

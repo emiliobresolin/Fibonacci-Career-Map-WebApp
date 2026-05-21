@@ -10,15 +10,17 @@ so that I can act on engagement nudges.
 
 ## Acceptance Criteria
 
-1. Dashboard widget "Pending Reviews" shows the count of evidence in `PENDING_APPROVAL` for the manager's reports.
-2. Widget "Stale Reviews" lists evidence pending > 7 days, with elevated visual emphasis (warning color, aging indicator).
-3. Both widgets refresh on realtime `evidence.*` events.
+1. Widgets are mounted into the E15.1 dashboard slots `manager.pending-reviews` and `manager.stale-reviews`; this story owns the widget components but not the route shell.
+2. Widget "Pending Reviews" shows the count of evidence in `PENDING_APPROVAL` for the manager's reports.
+3. Widget "Stale Reviews" lists evidence pending > 7 days, with elevated visual emphasis (warning color, aging indicator).
+4. Both widgets refresh on realtime `evidence.*` events.
 
 ## Tasks / Subtasks
 
 - [ ] Task covering AC #1
 - [ ] Task covering AC #2
 - [ ] Task covering AC #3
+- [ ] Task covering AC #4
 
 ## Dev Notes
 
@@ -31,6 +33,7 @@ so that I can act on engagement nudges.
 - E14.3
 - E8.4
 - E15.1
+- E5.5
 
 ### References
 

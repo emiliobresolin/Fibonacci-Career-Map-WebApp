@@ -30,7 +30,9 @@ so that the Web Worker can regenerate geometry deterministically.
 
 ### Dependencies
 
-- E7.1–E7.3
+- E7.1
+- E7.2
+- E7.3
 
 ### References
 

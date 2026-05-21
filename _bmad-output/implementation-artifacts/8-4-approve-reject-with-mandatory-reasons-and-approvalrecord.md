@@ -9,10 +9,11 @@ I want to approve or reject evidence with a written reason.
 
 ## Acceptance Criteria
 
-1. `PATCH /v1/evidence/:id/approve` requires `reason` ≥10 chars; `PATCH /v1/evidence/:id/reject` requires `reason` ≥20 chars.
-2. Both endpoints call `SelfApprovalGuard.ensureNotSelf(actor, evidence.employee.user_id)`; self-approval returns 403.
-3. On success, `approval_records` row is written with actor, decision, reason, timestamp.
-4. Approve transitions state → APPROVED and enqueues `scoring.recalc-employee` via outbox; Reject transitions → REJECTED. Both emit audit events.
+1. Migration creates `approval_records(id UUID PK, organization_id UUID FK, evidence_id UUID FK NULL, promotion_record_id UUID FK NULL, actor_id UUID FK, decision approval_decision_enum('APPROVED'|'REJECTED'), reason TEXT NOT NULL, decided_at TIMESTAMPTZ NOT NULL)` with RLS, `CHECK (evidence_id IS NOT NULL OR promotion_record_id IS NOT NULL)`, and `CHECK (NOT (evidence_id IS NOT NULL AND promotion_record_id IS NOT NULL))` so each row references exactly one parent. Append-only at the DB role level (no UPDATE/DELETE grant).
+2. `PATCH /v1/evidence/:id/approve` requires `reason` ≥10 chars; `PATCH /v1/evidence/:id/reject` requires `reason` ≥20 chars.
+3. Both endpoints call `SelfApprovalGuard.ensureNotSelf(actor, evidence.employee.user_id)`; self-approval returns 403.
+4. On success, `approval_records` row is written with actor, decision, reason, timestamp.
+5. Approve transitions state → APPROVED and enqueues `scoring.recalc-employee` via outbox; Reject transitions → REJECTED. Both emit audit events.
 
 ## Tasks / Subtasks
 
@@ -20,6 +21,7 @@ I want to approve or reject evidence with a written reason.
 - [ ] Task covering AC #2
 - [ ] Task covering AC #3
 - [ ] Task covering AC #4
+- [ ] Task covering AC #5
 
 ## Dev Notes
 
@@ -31,10 +33,14 @@ I want to approve or reject evidence with a written reason.
 
 - E8.1
 - E4.2
+- E2.5
+- E2.6
+- E3.3
 
 ### References
 
 - PRD FR-4.5, FR-4.6, §6.3, §9.2
+- Arch §6.2 (`approval_records`)
 - [Source: planning-artifacts/stories.md — index entry for this story]
 
 ## Dev Agent Record

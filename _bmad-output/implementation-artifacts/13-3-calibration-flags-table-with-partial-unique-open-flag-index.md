@@ -28,6 +28,8 @@ I want calibration flags with a DB-level guarantee of at most one open flag per 
 ### Dependencies
 
 - E6.2
+- E6.2a
+- E2.6
 
 ### References
 

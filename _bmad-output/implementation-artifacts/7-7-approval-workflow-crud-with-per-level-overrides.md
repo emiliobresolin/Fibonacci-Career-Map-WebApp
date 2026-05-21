@@ -29,6 +29,8 @@ I want TBD.
 
 - E7.1
 - E7.2
+- E2.6
+- E3.3
 
 ### References
 

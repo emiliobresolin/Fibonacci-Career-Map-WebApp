@@ -10,11 +10,12 @@ so that I can capture private coaching context next to scoring data and optional
 
 ## Acceptance Criteria
 
-1. Tab visible only to Manager (on direct report) and HR.
-2. `GET/POST /v1/employees/:id/development-notes` implemented with `visibility enum(PRIVATE, SHARED_WITH_EMPLOYEE)`, default `PRIVATE`.
-3. `PATCH /v1/development-notes/:id/share` transitions `PRIVATE → SHARED_WITH_EMPLOYEE`; reverse transition is rejected (DB trigger + domain guard).
-4. Employee viewing own panel sees only shared notes (never PRIVATE); `developmentnotes` RBAC per Arch §5.1.
-5. Each note create and share emits an audit event via outbox.
+1. Migration creates `development_notes(id UUID PK, organization_id UUID FK, manager_id UUID FK, employee_id UUID FK, body TEXT NOT NULL, visibility note_visibility_enum('PRIVATE'|'SHARED_WITH_EMPLOYEE') NOT NULL DEFAULT 'PRIVATE', created_at TIMESTAMPTZ NOT NULL, shared_at TIMESTAMPTZ NULL)` with RLS. A `BEFORE UPDATE` trigger rejects any transition from `SHARED_WITH_EMPLOYEE` back to `PRIVATE` (one-way share enforced at the DB level).
+2. Tab visible only to Manager (on direct report) and HR.
+3. `GET/POST /v1/employees/:id/development-notes` implemented with `visibility enum(PRIVATE, SHARED_WITH_EMPLOYEE)`, default `PRIVATE`.
+4. `PATCH /v1/development-notes/:id/share` transitions `PRIVATE → SHARED_WITH_EMPLOYEE`; reverse transition is rejected (DB trigger + domain guard).
+5. Employee viewing own panel sees only shared notes (never PRIVATE); `developmentnotes` RBAC per Arch §5.1.
+6. Each note create and share emits an audit event via outbox.
 
 ## Tasks / Subtasks
 
@@ -23,6 +24,7 @@ so that I can capture private coaching context next to scoring data and optional
 - [ ] Task covering AC #3
 - [ ] Task covering AC #4
 - [ ] Task covering AC #5
+- [ ] Task covering AC #6
 
 ## Dev Notes
 
@@ -32,13 +34,16 @@ so that I can capture private coaching context next to scoring data and optional
 
 ### Dependencies
 
+- E6.2a
 - E12.4
+- E2.5
+- E2.6
 - E3.3
 
 ### References
 
 - PRD §5.2 Development Notes, FR-3.14
-- Arch §5.1 developmentnotes, §5.4
+- Arch §5.1 developmentnotes, §5.4, §6.2 (`development_notes`)
 - [Source: planning-artifacts/stories.md — index entry for this story]
 
 ## Dev Agent Record
