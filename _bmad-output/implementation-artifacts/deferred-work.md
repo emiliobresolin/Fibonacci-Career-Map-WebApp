@@ -17,3 +17,14 @@ Tracks items from reviews that were intentionally deferred — not dismissed, no
 - **Real Zustand SSR + Context pattern with createStore.** Today's module-level singleton is safe because no Server Component reads from the store. Revisit when EPIC-2 introduces per-user state that needs server-side hydration.
 - **Long-running Node SSR `browserQueryClient` lifecycle.** Not relevant to the standard App Router runtime; would matter if the edge runtime is ever used. Defer.
 - **Tailwind dynamic-class safelist.** No runtime-built class names in scaffold; only relevant once 3D rendering builds class names from data (e.g., readiness opacity buckets).
+
+## Deferred from: code review of 1-4-prisma-schema-baseline-and-migration-tooling (2026-05-21)
+
+- **CI workflow file that invokes `prisma:migrate:deploy`.** Story 1-4 ships the script surface; Story 1-6 (Kubernetes / CI manifests) owns the orchestration. AC2 of Story 1-4 covers the *script* readiness, not the pipeline itself.
+- **ESLint `no-restricted-imports` rule banning direct `@prisma/client` imports.** AC3 ("single exported module") is honor-system today. Add a project-wide ESLint config in a dedicated linting story.
+- **`connection_limit` / `pool_timeout` query params on production DATABASE_URL.** Documented in `.env.example` but not enforced. Revisit during production prep when actual pod count + Postgres `max_connections` are known.
+- **Shadow database for `prisma migrate dev` against managed Postgres.** Add `SHADOW_DATABASE_URL` when the first dev uses a managed Postgres without `CREATEDB` privilege.
+- **PrismaService unit tests** (lifecycle warn path + onModuleDestroy). First real DB-touching domain module (EPIC-2) lands with integration tests that cover the service end-to-end; isolated unit tests are lower priority.
+- **Prisma 6 upgrade.** 5.22.0 is the stable 5.x release. Revisit once 6.x has been GA for a quarter.
+- **`DATABASE_URL` redaction in pino error logs.** Pino's redaction paths land in EPIC-1.7 (observability baseline).
+- **Pre-merge bot for migration timestamp ordering.** Process concern; address via CODEOWNERS + branch policy when CI lands (Story 1-6).

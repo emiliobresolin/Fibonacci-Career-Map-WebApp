@@ -74,7 +74,7 @@ test('compiled main.js exists', () => {
 
 test('API_MODE=api boots HTTP server and GET /healthz returns {status:"ok"}', skipIfNoDist, async () => {
   const port = await getFreePort();
-  const child = spawnApi({ API_MODE: 'api', PORT: String(port), NODE_ENV: 'test' });
+  const child = spawnApi({ API_MODE: 'api', PORT: String(port), NODE_ENV: 'test', DATABASE_URL: 'postgresql://stub:stub@stub.invalid:5432/stub' });
   let exitCode = null;
   child.on('exit', (c) => {
     exitCode = c;
@@ -106,7 +106,7 @@ test('API_MODE=worker boots without HTTP and logs "worker-mode ready"', skipIfNo
   // because the worker branch never calls .listen(). A regression that accidentally
   // re-introduces HTTP binding under worker mode would make this fetch succeed.
   const port = await getFreePort();
-  const child = spawnApi({ API_MODE: 'worker', PORT: String(port), NODE_ENV: 'test' });
+  const child = spawnApi({ API_MODE: 'worker', PORT: String(port), NODE_ENV: 'test', DATABASE_URL: 'postgresql://stub:stub@stub.invalid:5432/stub' });
   let exitCode = null;
   child.on('exit', (c) => {
     exitCode = c;
@@ -136,6 +136,8 @@ test('API_MODE=worker boots without HTTP and logs "worker-mode ready"', skipIfNo
 });
 
 test('API_MODE=unknown exits non-zero and stderr names the offending value', skipIfNoDist, async () => {
+  // DATABASE_URL intentionally omitted: validateEnv must fail on API_MODE before any
+  // downstream env check runs (e.g., PrismaClient construction).
   const child = spawnApi({ API_MODE: 'banana', NODE_ENV: 'test' });
   let stderrBuf = '';
   child.stderr.on('data', (c) => {

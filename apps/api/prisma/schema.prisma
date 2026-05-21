@@ -1,0 +1,38 @@
+// FCM API — Prisma schema (Story 1-4 baseline).
+//
+// Real domain tables land in later epics (Identity 2.x, Audit 3.x, Configuration 7.x,
+// Evidence 8.x, Scoring 9.x, Promotion 13.x, Notifications 14.x). This file ships only
+// a placeholder `_MigrationProbe` table so the migration pipeline is exercised end-to-end
+// before any domain model adds risk.
+//
+// IMPORTANT: future schema changes MUST go through `prisma migrate dev --name <name>`
+// against a local Postgres. Do not hand-edit migration SQL except for raw-SQL concerns
+// Prisma cannot model (RLS policies, partition management, triggers — see Arch §6.5).
+// The init migration is currently hand-written ONLY because Story 1-4 ships before any
+// local Postgres is provisioned; EPIC-2's identity schema will be generated via
+// `prisma migrate dev` and will supersede this baseline.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Placeholder model — validates that:
+///   • `prisma migrate dev` produces a migration
+///   • `prisma migrate deploy` applies it in CI
+///   • PrismaClient compiles and can be imported across the codebase
+/// This table is dropped by the first real-domain migration (EPIC-2's identity schema).
+/// UUIDs are generated client-side via Prisma's @default(uuid()) so the database role
+/// does not need CREATE EXTENSION privilege (some managed Postgres providers gate
+/// pgcrypto behind a superuser-only grant — Arch §12.3).
+model MigrationProbe {
+  id    String   @id @default(uuid()) @db.Uuid
+  ranAt DateTime @default(now()) @db.Timestamptz @map("ran_at")
+  note  String?
+
+  @@map("_MigrationProbe")
+}
