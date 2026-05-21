@@ -1,0 +1,45 @@
+# gitleaks config for the FCM repo (Story 1-9 AC2).
+#
+# Extends the bundled default ruleset (covers AWS keys, GCP keys, Azure keys,
+# generic API tokens, JWT, SSH keys, etc.) and layers a few project-specific
+# rules + allowlists.
+
+title = "fcm-gitleaks"
+
+[extend]
+useDefault = true
+
+# ─── Project-specific patterns ────────────────────────────────────────────────
+[[rules]]
+id = "fcm-database-url-with-password"
+description = "Postgres connection URL with embedded password (DATABASE_URL=postgres://user:password@host)"
+regex = '''postgres(?:ql)?:\/\/[^:\s]+:(?!<password>|\$\{|REPLACE_ME|stub|fcm:fcm)[^@\s]{3,}@[^\s'"]+'''
+tags = ["database", "credential"]
+
+[[rules]]
+id = "fcm-redis-url-with-password"
+description = "Redis URL with AUTH (rediss://:password@host)"
+regex = '''rediss?:\/\/[^:\s]*:(?!<password>|\$\{|REPLACE_ME|stub)[^@\s]{3,}@[^\s'"]+'''
+tags = ["cache", "credential"]
+
+# ─── Allowlists ───────────────────────────────────────────────────────────────
+[allowlist]
+description = "Paths and patterns intentionally containing example-shaped credentials"
+paths = [
+  '''.gitleaks\.toml$''',
+  '''_bmad-output/.*''',
+  '''_bmad/.*''',
+  '''.*\.md$''',                            # docs reference example strings
+  '''apps/api/\.env\.example$''',
+  '''tests/scaffold/.*\.test\.mjs$''',      # stub URLs intentionally
+  '''docs/.*''',
+]
+
+# Common placeholder shapes we don't want to flag.
+regexes = [
+  '''<password>''',
+  '''<user>''',
+  '''REPLACE_ME''',
+  '''postgresql://stub:stub@stub\.invalid''',
+  '''postgresql://fcm:fcm@localhost''',
+]
