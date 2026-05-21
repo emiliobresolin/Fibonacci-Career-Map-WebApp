@@ -14,7 +14,7 @@ development_status:
   1-5-managed-postgres-redis-and-object-storage-provisioned-via-terraform: done
   1-6-containerization-and-kubernetes-deployment-manifests-for-api-and-worker: done
   1-7-observability-baseline-pino-logs-prometheus-metrics-opentelemetry-sentry: done
-  1-8-health-probes-and-worker-heartbeat: backlog
+  1-8-health-probes-and-worker-heartbeat: done
   1-9-secrets-management-wiring: backlog
   epic-2: backlog
   2-1-identity-schema-users-organizations-role-assignments: backlog

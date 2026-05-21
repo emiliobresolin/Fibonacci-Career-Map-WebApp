@@ -14,6 +14,7 @@ import { Logger } from 'nestjs-pino';
 
 import { AppModule } from './app.module.js';
 import { validateEnv } from './common/env.config.js';
+import { startWorkerHeartbeat } from './observability/worker-heartbeat.js';
 
 async function bootstrap(): Promise<void> {
   // Single source of truth for env validation. Same Zod schema is also wired into
@@ -39,6 +40,10 @@ async function bootstrap(): Promise<void> {
     });
     app.useLogger(app.get(Logger));
     app.flushLogs();
+    // Worker heartbeat (Story 1-8 AC3) — emits a prom gauge + heartbeat file
+    // every 30s. K8s livenessProbe checks the file's mtime; the Prometheus
+    // alert defined in EPIC-16 fires when the gauge value is > 120s stale.
+    startWorkerHeartbeat();
     app.get(Logger).log('worker-mode ready', 'Bootstrap');
   }
 

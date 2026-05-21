@@ -76,15 +76,19 @@ spec:
             limits:
               cpu: "2000m"
               memory: "1Gi"
-          # Workers have no HTTP, so K8s probes use exec against a heartbeat
-          # file (Story 1-8 ships the proper heartbeat writer). Until then,
-          # this interim exec probe at least restarts the pod if the Node
-          # process disappears — without it, a wedged worker would consume
-          # CPU and trigger HPA scale-up without making any progress.
+          # Heartbeat-file probe (Story 1-8 AC3/AC4). The worker writes
+          # /app/.cache/heartbeat every 30s via startWorkerHeartbeat() in main.ts.
+          # We treat the worker as alive if the file's mtime is within the last
+          # 120s — same threshold as EPIC-16's Prometheus alert. A wedged event
+          # loop stops the writer; this probe restarts the pod, unlike the
+          # previous `pgrep` probe which only proved the process existed.
           livenessProbe:
             exec:
-              command: ["sh", "-c", "pgrep -f 'node .*main.js' >/dev/null"]
-            initialDelaySeconds: 30
+              command:
+                - sh
+                - -c
+                - 'test -f /app/.cache/heartbeat && test $(( $(date +%s) - $(stat -c %Y /app/.cache/heartbeat) )) -lt 120'
+            initialDelaySeconds: 60
             periodSeconds: 30
             timeoutSeconds: 3
             failureThreshold: 3
