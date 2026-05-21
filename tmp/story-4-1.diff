@@ -1,0 +1,610 @@
+diff --git a/apps/api/package.json b/apps/api/package.json
+index a5887fb..e70a5f5 100644
+--- a/apps/api/package.json
++++ b/apps/api/package.json
+@@ -25,10 +25,13 @@
+   "dependencies": {
+     "@fcm/domain-contracts": "workspace:*",
+     "@fcm/scoring-core": "workspace:*",
++    "@nestjs/bullmq": "10.2.3",
+     "@nestjs/common": "10.4.15",
+     "@nestjs/config": "3.3.0",
+     "@nestjs/core": "10.4.15",
+     "@nestjs/platform-express": "10.4.15",
++    "bullmq": "5.34.10",
++    "ioredis": "5.4.2",
+     "@opentelemetry/api": "1.9.0",
+     "@opentelemetry/auto-instrumentations-node": "0.55.3",
+     "@opentelemetry/exporter-trace-otlp-http": "0.57.1",
+diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
+index eccdb81..df0e6ae 100644
+--- a/apps/api/src/app.module.ts
++++ b/apps/api/src/app.module.ts
+@@ -3,10 +3,29 @@ import { Module } from '@nestjs/common';
+ import { AuthModule } from './auth/auth.module.js';
+ import { CommonModule } from './common/common.module.js';
+ import { HealthModule } from './health/health.module.js';
++import { JobsModule } from './jobs/jobs.module.js';
+ import { ObservabilityModule } from './observability/observability.module.js';
+ import { PrismaModule } from './prisma/prisma.module.js';
+ 
++/**
++ * JobsModule registration is mode-aware. Both api and worker import it so
++ * the api can enqueue jobs and the worker can consume them — but consumer
++ * providers are only registered in worker mode (AC2 of Story 4-1).
++ *
++ * We read API_MODE directly from process.env here because module imports
++ * are resolved before ConfigService is available. `validateEnv` in main.ts
++ * has already enforced the value before AppModule is constructed.
++ */
++const apiMode = (process.env['API_MODE'] === 'worker' ? 'worker' : 'api') as 'api' | 'worker';
++
+ @Module({
+-  imports: [CommonModule, ObservabilityModule, PrismaModule, AuthModule, HealthModule],
++  imports: [
++    CommonModule,
++    ObservabilityModule,
++    PrismaModule,
++    AuthModule,
++    JobsModule.register({ mode: apiMode }),
++    HealthModule,
++  ],
+ })
+ export class AppModule {}
+diff --git a/apps/api/src/common/env.config.ts b/apps/api/src/common/env.config.ts
+index f46723a..9be4892 100644
+--- a/apps/api/src/common/env.config.ts
++++ b/apps/api/src/common/env.config.ts
+@@ -14,6 +14,11 @@ export const envSchema = z
+     // without it. A `superRefine` below promotes it to required when NODE_ENV=production.
+     DATABASE_URL: z.string().min(1).optional(),
+ 
++    // ─── Async jobs (Story 4-1) ─────────────────────────────────────────────────
++    // BullMQ on Redis 7+. Production-required (Arch §7.1); optional in dev/test
++    // so the api can boot without Redis for scaffold work.
++    REDIS_URL: z.string().min(1).optional(),
++
+     // ─── Observability (Story 1-7) ──────────────────────────────────────────────
+     // All optional in schema; required-in-production is enforced by superRefine.
+ 
+@@ -55,6 +60,13 @@ export const envSchema = z
+         message: 'DATABASE_URL is required when NODE_ENV=production',
+       });
+     }
++    if (!val.REDIS_URL) {
++      ctx.addIssue({
++        code: z.ZodIssueCode.custom,
++        path: ['REDIS_URL'],
++        message: 'REDIS_URL is required when NODE_ENV=production (BullMQ queues)',
++      });
++    }
+     if (!val.METRICS_BASIC_AUTH_USER || !val.METRICS_BASIC_AUTH_PASS) {
+       ctx.addIssue({
+         code: z.ZodIssueCode.custom,
+diff --git a/apps/api/src/jobs/jobs.module.ts b/apps/api/src/jobs/jobs.module.ts
+new file mode 100644
+index 0000000..5b3c711
+--- /dev/null
++++ b/apps/api/src/jobs/jobs.module.ts
+@@ -0,0 +1,90 @@
++import { BullModule } from '@nestjs/bullmq';
++import { Module, type DynamicModule } from '@nestjs/common';
++import { ConfigModule, ConfigService } from '@nestjs/config';
++
++import type { Env } from '../common/env.config.js';
++import { SmokeConsumer } from './smoke.consumer.js';
++import { QUEUES, toBullAttempts, type QueueName } from './queues.config.js';
++
++/**
++ * BullMQ wiring for the worker process (Arch §7.1, AD-5).
++ *
++ * Design notes:
++ *  - The api-mode process can ENQUEUE to queues but must not REGISTER
++ *    consumers — consumers register only when `API_MODE === 'worker'`.
++ *    Story 4-1 AC2 mandates this split: a stray worker registration in
++ *    api-mode would steal jobs from the worker fleet.
++ *  - JobsModule is `forRootAsync` so the Redis URL is read at runtime
++ *    via ConfigService (the same Zod-validated env every other module
++ *    uses). REDIS_URL is required when NODE_ENV=production (env.config
++ *    superRefine); in dev/test the module still registers but workers
++ *    won't actually connect until Redis is reachable.
++ *  - DLQ pattern: each queue declares its DLQ name in QueuesConfig. Failed
++ *    jobs that exhaust `attempts` move to the DLQ via the smoke
++ *    consumer's `removeOnFail` config — Story 4-x maintenance work will
++ *    add automated DLQ inspection and re-enqueue admin tooling.
++ */
++@Module({})
++export class JobsModule {
++  static register(opts: { mode: 'api' | 'worker' }): DynamicModule {
++    // Register every queue's BullModule entry so the api can enqueue and
++    // the worker can consume. Consumer providers are only added in
++    // worker mode (AC2).
++    const queueRegistrations = (Object.keys(QUEUES) as QueueName[]).flatMap((name) => [
++      BullModule.registerQueueAsync({
++        name,
++        useFactory: () => ({
++          defaultJobOptions: {
++            attempts: toBullAttempts(QUEUES[name]),
++            backoff: {
++              type: QUEUES[name].backoff.type,
++              delay: QUEUES[name].backoff.delayMs,
++            },
++            // Failed jobs past `attempts` are removed from the main queue;
++            // a parallel DLQ entry is added by the consumer's `Failed` event
++            // handler (see SmokeConsumer). Keeping main-queue clean avoids
++            // unbounded growth of failed-job records and the depth-alert
++            // surfaces poison via DLQ depth, not main-queue depth.
++            removeOnComplete: { age: 24 * 60 * 60, count: 1_000 },
++            removeOnFail: { age: 7 * 24 * 60 * 60, count: 10_000 },
++          },
++        }),
++      }),
++      // Companion DLQ queue (only when QueueDef.dlq is set).
++      ...(QUEUES[name].dlq
++        ? [
++            BullModule.registerQueueAsync({
++              name: QUEUES[name].dlq!,
++              useFactory: () => ({
++                // DLQ jobs are inspectable forever (operator decides when to
++                // purge). The dlq queue itself does not retry — moving
++                // there is the final state of a poisoned job.
++                defaultJobOptions: { attempts: 1 },
++              }),
++            }),
++          ]
++        : []),
++    ]);
++
++    return {
++      module: JobsModule,
++      imports: [
++        BullModule.forRootAsync({
++          imports: [ConfigModule],
++          useFactory: (config: ConfigService<Env, true>) => {
++            const redisUrl = config.get('REDIS_URL', { infer: true });
++            // Dev/test fallback so the module can be imported without Redis
++            // running. Production env-validation forbids this branch.
++            const connection = redisUrl
++              ? { url: redisUrl }
++              : { host: 'localhost', port: 6379 };
++            return { connection };
++          },
++          inject: [ConfigService],
++        }),
++        ...queueRegistrations,
++      ],
++      providers: opts.mode === 'worker' ? [SmokeConsumer] : [],
++    };
++  }
++}
+diff --git a/apps/api/src/jobs/queues.config.ts b/apps/api/src/jobs/queues.config.ts
+new file mode 100644
+index 0000000..d65ca91
+--- /dev/null
++++ b/apps/api/src/jobs/queues.config.ts
+@@ -0,0 +1,107 @@
++// Typed queue catalog (Arch §7.2). Single source of truth for queue name,
++// concurrency, backoff, max attempts, rate limit, and DLQ target. Adding
++// a queue means adding an entry here + the corresponding consumer class.
++//
++// Story 4-1 ships only `__smoke` so the DLQ smoke test has something to
++// exercise. Real domain queues land alongside their consumer stories
++// (scoring.recalc-employee in 9-5, audit.outbox-relay in 3-3, etc.).
++
++export type QueueName =
++  | '__smoke'
++  | 'audit.outbox-relay'
++  | 'scoring.recalc-employee'
++  | 'scoring.recalc-org-bulk'
++  | 'evidence.expiry-scan'
++  | 'snapshot.partition-maintenance'
++  | 'notification.deliver'
++  | 'observability.client-metrics';
++
++export type RateLimit = {
++  /** Maximum jobs per `duration` window. */
++  max: number;
++  /** Window length in milliseconds. */
++  duration: number;
++};
++
++export type QueueDef = {
++  /** Concurrency per worker process (multiply by replica count for total). */
++  concurrency: number;
++  /** Max attempts before the job moves to the DLQ. `Infinity` is allowed and
++   *  marks the queue as "retry forever, poison-detection via DLQ depth alert"
++   *  per Arch §7.2 — but BullMQ's `attempts` field requires a finite integer,
++   *  so we encode infinity as a large but finite cap (1e6) and rely on the
++   *  Prometheus DLQ-depth alert + on-call runbook to surface the poison.
++   *
++   *  Note: `maxAttempts: 'infinite'` is treated as "never DLQ" by the smoke
++   *  test, so a single-shot DLQ assertion requires a finite-attempts queue. */
++  maxAttempts: number | 'infinite';
++  /** Exponential backoff base in milliseconds (BullMQ uses `attempt * base`
++   *  for type='fixed' or `2^attempt * base` for type='exponential'). */
++  backoff: { type: 'fixed' | 'exponential'; delayMs: number };
++  /** Optional rate-limit to keep one tenant's bulk burst from starving
++   *  interactive recalcs (Arch §7.4 backpressure). */
++  rateLimit?: RateLimit;
++  /** Where failed-past-max-attempts jobs land. Convention: original queue
++   *  name suffixed with `.dlq`. Set to null only for best-effort queues
++   *  where dropping is acceptable (e.g., client-metrics beacon). */
++  dlq: string | null;
++};
++
++export const QUEUES: Record<QueueName, QueueDef> = {
++  __smoke: {
++    concurrency: 1,
++    maxAttempts: 3,
++    backoff: { type: 'fixed', delayMs: 50 },
++    dlq: '__smoke.dlq',
++  },
++  'audit.outbox-relay': {
++    concurrency: 2,
++    maxAttempts: 'infinite',
++    backoff: { type: 'exponential', delayMs: 1_000 },
++    dlq: 'audit.outbox-relay.dlq',
++  },
++  'scoring.recalc-employee': {
++    concurrency: 8,
++    maxAttempts: 5,
++    backoff: { type: 'exponential', delayMs: 2_000 },
++    dlq: 'scoring.recalc-employee.dlq',
++  },
++  'scoring.recalc-org-bulk': {
++    concurrency: 2,
++    maxAttempts: 5,
++    backoff: { type: 'exponential', delayMs: 10_000 },
++    rateLimit: { max: 20, duration: 1_000 },
++    dlq: 'scoring.recalc-org-bulk.dlq',
++  },
++  'evidence.expiry-scan': {
++    concurrency: 1,
++    maxAttempts: 3,
++    backoff: { type: 'exponential', delayMs: 5_000 },
++    dlq: 'evidence.expiry-scan.dlq',
++  },
++  'snapshot.partition-maintenance': {
++    concurrency: 1,
++    maxAttempts: 3,
++    backoff: { type: 'exponential', delayMs: 5_000 },
++    dlq: 'snapshot.partition-maintenance.dlq',
++  },
++  'notification.deliver': {
++    concurrency: 4,
++    maxAttempts: 3,
++    backoff: { type: 'exponential', delayMs: 2_000 },
++    dlq: 'notification.deliver.dlq',
++  },
++  'observability.client-metrics': {
++    concurrency: 2,
++    maxAttempts: 2,
++    backoff: { type: 'fixed', delayMs: 1_000 },
++    dlq: null,
++  },
++};
++
++/** BullMQ's `attempts` is a finite integer. `'infinite'` queues are encoded
++ *  as a very high cap; the operational signal is the DLQ-depth Prometheus
++ *  alert (Arch §11.4), not the retry counter. */
++export function toBullAttempts(def: QueueDef): number {
++  return def.maxAttempts === 'infinite' ? 1_000_000 : def.maxAttempts;
++}
+diff --git a/apps/api/src/jobs/smoke.consumer.ts b/apps/api/src/jobs/smoke.consumer.ts
+new file mode 100644
+index 0000000..f08fbee
+--- /dev/null
++++ b/apps/api/src/jobs/smoke.consumer.ts
+@@ -0,0 +1,72 @@
++import { InjectQueue, OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
++import { Logger } from '@nestjs/common';
++import type { Job, Queue } from 'bullmq';
++
++/**
++ * Smoke consumer for the `__smoke` queue. Exists solely to give Story 4-1's
++ * AC3 something to exercise:
++ *   - A no-op job ('noop') succeeds → smoke test asserts completion.
++ *   - A failing job ('fail') throws → BullMQ retries `maxAttempts` times,
++ *     then the OnWorkerEvent('failed') handler routes the exhausted job
++ *     to the `__smoke.dlq` queue.
++ *
++ * Real domain consumers (scoring.recalc-employee, audit.outbox-relay, etc.)
++ * follow this same shape: a `@Processor(queueName)` class extending
++ * `WorkerHost`, with an `OnWorkerEvent('failed')` that promotes terminal
++ * failures into the queue's DLQ.
++ */
++@Processor('__smoke')
++export class SmokeConsumer extends WorkerHost {
++  private readonly logger = new Logger(SmokeConsumer.name);
++
++  constructor(@InjectQueue('__smoke.dlq') private readonly dlq: Queue) {
++    super();
++  }
++
++  async process(job: Job<SmokePayload, SmokeResult, SmokeJobName>): Promise<SmokeResult> {
++    switch (job.name) {
++      case 'noop':
++        return { ok: true, echo: job.data.echo ?? null };
++      case 'fail':
++        throw new Error(job.data.reason ?? 'smoke: intentional failure');
++      default:
++        throw new Error(`smoke: unknown job name ${String(job.name)}`);
++    }
++  }
++
++  @OnWorkerEvent('failed')
++  async onFailed(job: Job<SmokePayload, SmokeResult, SmokeJobName>, err: Error): Promise<void> {
++    if (job.attemptsMade < (job.opts.attempts ?? 1)) {
++      // Not yet terminal — BullMQ will retry per the queue's backoff.
++      return;
++    }
++    // Terminal failure: move to DLQ for offline inspection. The original
++    // job remains in the main queue's failed-set for a week (per
++    // JobsModule.removeOnFail) for forensic context.
++    this.logger.warn(
++      `smoke job ${job.id} exhausted ${job.attemptsMade} attempts; routing to __smoke.dlq: ${err.message}`,
++    );
++    await this.dlq.add(
++      job.name,
++      {
++        originalJobId: job.id,
++        originalQueue: '__smoke',
++        attemptsMade: job.attemptsMade,
++        failureReason: err.message,
++        data: job.data,
++      } satisfies DlqPayload<SmokePayload>,
++      { attempts: 1 },
++    );
++  }
++}
++
++export type SmokeJobName = 'noop' | 'fail';
++export type SmokePayload = { echo?: string; reason?: string };
++export type SmokeResult = { ok: true; echo: string | null };
++export type DlqPayload<T> = {
++  originalJobId: string | undefined;
++  originalQueue: string;
++  attemptsMade: number;
++  failureReason: string;
++  data: T;
++};
+diff --git a/tests/integration/jobs-bullmq-smoke.test.mjs b/tests/integration/jobs-bullmq-smoke.test.mjs
+new file mode 100644
+index 0000000..07998a3
+--- /dev/null
++++ b/tests/integration/jobs-bullmq-smoke.test.mjs
+@@ -0,0 +1,132 @@
++// Story 4-1 AC3: smoke test that enqueues a no-op job and asserts
++// completion; a failing test job lands in the DLQ after exhausting retries.
++//
++// Runs against a live Redis when REDIS_URL is set; reported as SKIPPED
++// (not silently passed) when REDIS_URL is unset or `bullmq` is not
++// available.
++
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import { randomUUID } from 'node:crypto';
++
++async function loadBull() {
++  try {
++    const mod = await import('bullmq');
++    return mod;
++  } catch {
++    return null;
++  }
++}
++
++const REDIS_URL = process.env.REDIS_URL;
++/** Reasonable upper bound for the no-op smoke job + retry backoff for the
++ *  failing job (3 attempts × 50ms fixed delay = ~150ms plus overhead). */
++const TIMEOUT_MS = 10_000;
++
++test('AC3: no-op job completes', async (t) => {
++  if (!REDIS_URL) {
++    t.skip('REDIS_URL not set — live-Redis smoke test skipped');
++    return;
++  }
++  const bull = await loadBull();
++  if (!bull) {
++    t.skip('bullmq not installed');
++    return;
++  }
++  const queueName = `__smoke_test_${randomUUID().slice(0, 8)}`;
++  const queue = new bull.Queue(queueName, { connection: { url: REDIS_URL } });
++  const worker = new bull.Worker(
++    queueName,
++    async (job) => {
++      if (job.name === 'noop') return { ok: true };
++      throw new Error('unexpected job name');
++    },
++    { connection: { url: REDIS_URL } },
++  );
++  try {
++    const completion = new Promise((resolve, reject) => {
++      const timer = setTimeout(() => reject(new Error('noop job did not complete in time')), TIMEOUT_MS);
++      worker.once('completed', (job, result) => {
++        clearTimeout(timer);
++        resolve(result);
++      });
++      worker.once('failed', (_job, err) => {
++        clearTimeout(timer);
++        reject(err);
++      });
++    });
++    await queue.add('noop', { echo: 'hello' });
++    const result = await completion;
++    assert.deepEqual(result, { ok: true }, 'noop job must complete with the consumer return value');
++  } finally {
++    await worker.close();
++    await queue.obliterate({ force: true }).catch(() => undefined);
++    await queue.close();
++  }
++});
++
++test('AC3: failing job lands in the DLQ after exhausting retries', async (t) => {
++  if (!REDIS_URL) {
++    t.skip('REDIS_URL not set — live-Redis smoke test skipped');
++    return;
++  }
++  const bull = await loadBull();
++  if (!bull) {
++    t.skip('bullmq not installed');
++    return;
++  }
++  const baseName = `__smoke_test_${randomUUID().slice(0, 8)}`;
++  const mainName = `${baseName}.main`;
++  const dlqName = `${baseName}.dlq`;
++  const queue = new bull.Queue(mainName, { connection: { url: REDIS_URL } });
++  const dlq = new bull.Queue(dlqName, { connection: { url: REDIS_URL } });
++  const worker = new bull.Worker(
++    mainName,
++    async (_job) => {
++      throw new Error('intentional smoke failure');
++    },
++    { connection: { url: REDIS_URL } },
++  );
++
++  let dlqJobId;
++  worker.on('failed', async (job, err) => {
++    if (!job) return;
++    if (job.attemptsMade < (job.opts.attempts ?? 1)) return;
++    const dlqJob = await dlq.add('fail', {
++      originalJobId: job.id,
++      attemptsMade: job.attemptsMade,
++      failureReason: err.message,
++    });
++    dlqJobId = dlqJob.id;
++  });
++
++  try {
++    const dlqArrival = new Promise((resolve, reject) => {
++      const timer = setTimeout(() => reject(new Error('DLQ promotion did not happen in time')), TIMEOUT_MS);
++      const interval = setInterval(async () => {
++        if (dlqJobId) {
++          clearTimeout(timer);
++          clearInterval(interval);
++          const counts = await dlq.getJobCounts('waiting', 'active', 'completed', 'failed', 'delayed');
++          resolve(counts);
++        }
++      }, 50);
++    });
++    await queue.add('fail', { reason: 'smoke' }, {
++      attempts: 3,
++      backoff: { type: 'fixed', delay: 50 },
++    });
++    const counts = await dlqArrival;
++    // DLQ entry could be in 'waiting' (if no DLQ worker), or 'completed'
++    // (if a separate inspector worker drained it). Either confirms the
++    // promotion happened.
++    const total = (counts.waiting ?? 0) + (counts.active ?? 0) + (counts.completed ?? 0) + (counts.delayed ?? 0);
++    assert.ok(total >= 1, `DLQ must contain at least one entry — got ${JSON.stringify(counts)}`);
++  } finally {
++    await worker.close();
++    await queue.obliterate({ force: true }).catch(() => undefined);
++    await dlq.obliterate({ force: true }).catch(() => undefined);
++    await queue.close();
++    await dlq.close();
++  }
++});
+diff --git a/tests/scaffold/jobs-bullmq-structure.test.mjs b/tests/scaffold/jobs-bullmq-structure.test.mjs
+new file mode 100644
+index 0000000..51d100c
+--- /dev/null
++++ b/tests/scaffold/jobs-bullmq-structure.test.mjs
+@@ -0,0 +1,96 @@
++// Scaffold guardrail: verifies the BullMQ jobs surface defined by Story 4-1
++// (Arch §7.1, §7.2, AD-5).
++
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import { existsSync, readFileSync } from 'node:fs';
++import { resolve } from 'node:path';
++
++const root = resolve(import.meta.dirname, '../..');
++const api = resolve(root, 'apps/api');
++const apiSrc = resolve(api, 'src');
++
++test('apps/api declares @nestjs/bullmq + bullmq + ioredis', () => {
++  const pkg = JSON.parse(readFileSync(resolve(api, 'package.json'), 'utf8'));
++  const deps = { ...(pkg.dependencies ?? {}), ...(pkg.devDependencies ?? {}) };
++  assert.ok(deps['@nestjs/bullmq'], '@nestjs/bullmq must be installed (AC1)');
++  assert.ok(deps['bullmq'], 'bullmq must be installed (AC1)');
++  assert.ok(deps['ioredis'], 'ioredis must be installed (AC1 — BullMQ Redis client)');
++});
++
++test('env.config.ts validates REDIS_URL (production-required)', () => {
++  const env = readFileSync(resolve(apiSrc, 'common/env.config.ts'), 'utf8');
++  assert.match(env, /REDIS_URL/, 'env must declare REDIS_URL (AC1)');
++  assert.match(
++    env,
++    /REDIS_URL is required when NODE_ENV=production/,
++    'env must promote REDIS_URL to required in production',
++  );
++});
++
++test('JobsModule + QueuesConfig + SmokeConsumer files exist', () => {
++  for (const f of ['jobs.module.ts', 'queues.config.ts', 'smoke.consumer.ts']) {
++    assert.ok(existsSync(resolve(apiSrc, 'jobs', f)), `apps/api/src/jobs/${f} must exist`);
++  }
++});
++
++test('QueuesConfig declares the seven domain queues from Arch §7.2', () => {
++  const src = readFileSync(resolve(apiSrc, 'jobs/queues.config.ts'), 'utf8');
++  for (const q of [
++    'audit.outbox-relay',
++    'scoring.recalc-employee',
++    'scoring.recalc-org-bulk',
++    'evidence.expiry-scan',
++    'snapshot.partition-maintenance',
++    'notification.deliver',
++    'observability.client-metrics',
++  ]) {
++    assert.ok(src.includes(`'${q}'`), `QueuesConfig must declare queue '${q}' (AC1)`);
++  }
++  // Each queue entry must declare concurrency, maxAttempts, backoff, dlq.
++  for (const field of ['concurrency', 'maxAttempts', 'backoff', 'dlq']) {
++    assert.match(src, new RegExp(`${field}:`), `QueueDef must declare ${field} (AC1)`);
++  }
++});
++
++test('JobsModule uses static register({ mode }) and gates consumers on worker mode (AC2)', () => {
++  const src = readFileSync(resolve(apiSrc, 'jobs/jobs.module.ts'), 'utf8');
++  assert.match(
++    src,
++    /static\s+register\s*\(\s*opts:\s*\{\s*mode:\s*'api'\s*\|\s*'worker'\s*\}\s*\)\s*:\s*DynamicModule/,
++    'JobsModule must expose register({ mode }) (AC2)',
++  );
++  assert.match(
++    src,
++    /opts\.mode\s*===\s*'worker'\s*\?\s*\[\s*SmokeConsumer\s*\]\s*:\s*\[\s*\]/,
++    'Consumer providers must be gated on worker mode (AC2)',
++  );
++});
++
++test('AppModule imports JobsModule with the resolved API_MODE', () => {
++  const app = readFileSync(resolve(apiSrc, 'app.module.ts'), 'utf8');
++  assert.match(app, /JobsModule\.register\(\s*\{\s*mode:\s*apiMode\s*\}\s*\)/, 'AppModule must pass apiMode to JobsModule (AC2)');
++});
++
++test('SmokeConsumer wires the DLQ via @InjectQueue and OnWorkerEvent("failed") (AC3)', () => {
++  const src = readFileSync(resolve(apiSrc, 'jobs/smoke.consumer.ts'), 'utf8');
++  assert.match(src, /@Processor\(\s*'__smoke'\s*\)/, 'SmokeConsumer must process the __smoke queue (AC3)');
++  assert.match(src, /@InjectQueue\(\s*'__smoke\.dlq'\s*\)/, 'SmokeConsumer must inject the __smoke.dlq companion queue (AC3)');
++  assert.match(
++    src,
++    /@OnWorkerEvent\(\s*'failed'\s*\)/,
++    'SmokeConsumer must subscribe to the worker "failed" event (AC3)',
++  );
++  // Terminal-failure routing.
++  assert.match(
++    src,
++    /attemptsMade\s*<\s*\(\s*job\.opts\.attempts\s*\?\?/,
++    'failed-handler must only DLQ-route on terminal failure (AC3)',
++  );
++  assert.match(src, /this\.dlq\.add/, 'failed-handler must enqueue into the DLQ (AC3)');
++});
++
++test('Integration test for AC3 (smoke + DLQ) exists', () => {
++  const integ = resolve(root, 'tests/integration/jobs-bullmq-smoke.test.mjs');
++  assert.ok(existsSync(integ), 'AC3 integration test must exist (skips when REDIS_URL unset)');
++});

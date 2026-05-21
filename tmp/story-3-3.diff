@@ -1,0 +1,938 @@
+warning: in the working copy of 'apps/api/package.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/api/src/app.module.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/api/src/jobs/queues.config.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'tests/scaffold/jobs-bullmq-structure.test.mjs', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'apps/api/src/outbox/outbox-depth.service.ts', LF will be replaced by CRLF the next time Git touches it
+diff --git a/apps/api/package.json b/apps/api/package.json
+index e70a5f5..055f54a 100644
+--- a/apps/api/package.json
++++ b/apps/api/package.json
+@@ -43,6 +43,7 @@
+     "jose": "5.9.6",
+     "openid-client": "5.7.1",
+     "nestjs-pino": "4.4.0",
++    "pg": "8.13.1",
+     "pino": "9.5.0",
+     "pino-http": "10.3.0",
+     "prisma": "5.22.0",
+@@ -54,6 +55,7 @@
+   "devDependencies": {
+     "@types/express": "4.17.21",
+     "@types/node": "20.17.10",
++    "@types/pg": "8.11.10",
+     "cross-env": "7.0.3",
+     "pino-pretty": "11.3.0",
+     "tsx": "4.19.2"
+diff --git a/apps/api/src/app.module.ts b/apps/api/src/app.module.ts
+index 50a4182..a48abf8 100644
+--- a/apps/api/src/app.module.ts
++++ b/apps/api/src/app.module.ts
+@@ -5,6 +5,7 @@ import { CommonModule } from './common/common.module.js';
+ import { HealthModule } from './health/health.module.js';
+ import { JobsModule } from './jobs/jobs.module.js';
+ import { ObservabilityModule } from './observability/observability.module.js';
++import { OutboxModule } from './outbox/outbox.module.js';
+ import { PrismaModule } from './prisma/prisma.module.js';
+ 
+ export type ApiMode = 'api' | 'worker';
+@@ -31,6 +32,7 @@ export class AppModule {
+         PrismaModule,
+         AuthModule,
+         JobsModule.register({ mode: opts.mode }),
++        OutboxModule.register({ mode: opts.mode }),
+         HealthModule,
+       ],
+     };
+diff --git a/apps/api/src/jobs/queues.config.ts b/apps/api/src/jobs/queues.config.ts
+index ccd9514..f9d2503 100644
+--- a/apps/api/src/jobs/queues.config.ts
++++ b/apps/api/src/jobs/queues.config.ts
+@@ -107,9 +107,10 @@ export const QUEUES: Record<QueueName, QueueDef> = {
+   },
+ };
+ 
+-/** Queues whose producer and/or consumer ship in Story 4-1. Future stories
+- *  add their queue to this set when they ship their producer/consumer. */
+-export const ACTIVE_QUEUES: readonly QueueName[] = ['__smoke'] as const;
++/** Queues whose producer and/or consumer ship now. Future stories extend
++ *  the set when they ship their producer/consumer. Stories shipping queues:
++ *  4-1 → __smoke; 3-3 → audit.outbox-relay. */
++export const ACTIVE_QUEUES: readonly QueueName[] = ['__smoke', 'audit.outbox-relay'] as const;
+ 
+ /** Returns the DLQ name for a queue if it has one, else null. */
+ export function dlqOf(name: QueueName): string | null {
+diff --git a/apps/api/src/outbox/outbox-depth.service.ts b/apps/api/src/outbox/outbox-depth.service.ts
+new file mode 100644
+index 0000000..606a876
+--- /dev/null
++++ b/apps/api/src/outbox/outbox-depth.service.ts
+@@ -0,0 +1,63 @@
++import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
++import { Gauge } from 'prom-client';
++
++import { MetricsService } from '../observability/metrics.service.js';
++import { PrismaService } from '../prisma/prisma.service.js';
++
++/**
++ * Emits `fcm_outbox_relay_depth` (Arch §11.4 / Story 3-3 AC4).
++ *
++ * The gauge counts unpublished outbox rows. EPIC-16 wires the actual alert
++ * rule (depth > 0 for > 5 minutes → page); this story owns the metric
++ * surface so the alert has something to fire against.
++ *
++ * Sampled every 15s. The COUNT query uses the partial index from Story 3-2
++ * (`outbox_events_unpublished_idx`) so the cost is bounded to the size of
++ * the unpublished set, not the cumulative table.
++ */
++@Injectable()
++export class OutboxDepthService implements OnModuleInit, OnModuleDestroy {
++  private readonly logger = new Logger(OutboxDepthService.name);
++  private gauge: Gauge<string> | null = null;
++  private timer: NodeJS.Timeout | null = null;
++  private static readonly SAMPLE_INTERVAL_MS = 15_000;
++
++  constructor(
++    @Inject(MetricsService) private readonly metrics: MetricsService,
++    @Inject(PrismaService) private readonly prisma: PrismaService,
++  ) {}
++
++  onModuleInit(): void {
++    this.gauge = new Gauge({
++      name: 'fcm_outbox_relay_depth',
++      help: 'Unpublished outbox_events rows (relay backlog). Alert at depth > 0 for > 5 minutes (EPIC-16).',
++      registers: [this.metrics.registry],
++    });
++    // Sample immediately so the first scrapwarning: in the working copy of 'apps/api/src/outbox/outbox-listener.service.ts', LF will be replaced by CRLF the next time Git touches it
+e doesn't miss the gauge.
++    void this.sample();
++    this.timer = setInterval(() => {
++      void this.sample();
++    }, OutboxDepthService.SAMPLE_INTERVAL_MS);
++    this.timer.unref();
++  }
++
++  onModuleDestroy(): void {
++    if (this.timer) {
++      clearInterval(this.timer);
++      this.timer = null;
++    }
++  }
++
++  private async sample(): Promise<void> {
++    if (!this.gauge) return;
++    try {
++      const depth = await this.prisma.outboxEvent.count({ where: { publishedAt: null } });
++      this.gauge.set(depth);
++    } catch (err) {
++      // Don't crash the worker if the DB is briefly unavailable — the
++      // listener has its own reconnect path. Reset to 0 would lie about
++      // depth, so we leave the previous value in place.
++      this.logger.warn(`outbox depth sample failed: ${(err as Error).message}`);
++    }
++  }
++}
+diff --git a/apps/api/src/outbox/outbox-listener.service.ts b/apps/api/src/outbox/outbox-listener.service.ts
+new file mode 100644
+index 0000000..a194846
+--- /dev/null
++++ b/apps/api/src/outbox/outbox-listener.service.ts
+@@ -0,0 +1,186 @@
++import { InjectQueue } from '@nestjs/bullmq';
++import { Inject, Injectable, Logger, type OnModuleDestroy, type OnModuleInit } from '@nestjs/common';
++import { ConfigService } from '@nestjs/config';
++import type { Queue } from 'bullmq';
++import pg from 'pg';
++
++const { Client: PgClient } = pg;
++type PgClient = InstanceType<typeof PgClient>;
++
++import type { Env } from '../common/env.config.js';
++import { PrismaService } from '../prisma/prisma.service.js';
++
++/**
++ * Postgres LISTEN/NOTIFY pump for the outbox (Arch §9.3 / AD-7 / Story 3-3 AC1).
++ *
++ *   • A dedicated pg.Client connection issues `LISTEN outbox_new`.
++ *   • Each NOTIFY payload is the event_id of an inserted row; the listener
++ *     enqueues a `relay` job onto `audit.outbox-relay` with that event_id
++ *     as the BullMQ jobId (idempotent enqueue — duplicate NOTIFYs coalesce
++ *     in BullMQ before the consumer ever runs).
++ *   • On startup AND on every reconnect, a catch-up scan picks up any
++ *     unpublished rows that landed during the disconnect window — PG does
++ *     NOT buffer notifications for absent listeners.
++ *   • A periodic safety scan (60s) also fires irrespective of NOTIFY
++ *     traffic, so a perfectly silent NOTIFY pipe (broken trigger, dropped
++ *     connection that didn't surface as an error event) still drains the
++ *     backlog within a minute.
++ *   • Reconnect uses exponential backoff capped at 30s.
++ *
++ * Worker-mode only. The api-mode application context never imports this
++ * service — `OutboxModule.register({ mode })` gates it.
++ */
++@Injectable()
++export class OutboxListenerService implements OnModuleInit, OnModuleDestroy {
++  private readonly logger = new Logger(OutboxListenerService.name);
++  private client: PgClient | null = null;
++  private reconnectTimer: NodeJS.Timeout | null = null;
++  private safetyScanTimer: NodeJS.Timeout | null = null;
++  private reconnectAttempt = 0;
++  private shuttingDown = false;
++  private static readonly CHANNEL = 'outbox_new';
++  private static readonly SAFETY_SCAN_INTERVAL_MS = 60_000;
++  private static readonly RECONNECT_MAX_DELAY_MS = 30_000;
++  /** Batch cap so a backlog scan can't dump 100k jobs into BullMQ in one go. */
++  private static readonly CATCHUP_BATCH = 500;
++
++  constructor(
++    @Inject(ConfigService) private readonly config: ConfigService<Env, true>,
++    @Inject(PrismaService) private readonly prisma: PrismaService,
++    @InjectQueue('audit.outbox-relay') private readonly queue: Queue,
++  ) {}
++
++  onModuleInit(): void {
++    // Fire-and-forget the initial connect: a failure here (DB unreachable
++    // at boot — e.g., the api-bootstrap scaffold test points at a stub
++    // hostname) must not crash the worker. The connect() method's own
++    // try/catch routes failures into scheduleReconnect() which will keep
++    // trying with exponential backoff.
++    this.connect().catch((err) => {
++      this.logger.warn(`outbox listener initial connect threw: ${(err as Error).message}`);
++      this.scheduleReconnect();
++    });
++    this.safetyScanTimer = setInterval(() => {
++      this.safetyScan().catch((err) => this.logger.warn(`outbox safety scan failed: ${String(err)}`));
++    }, OutboxListenerService.SAFETY_SCAN_INTERVAL_MS);
++    // Detach from process for graceful shutdown so a pending timer doesn't
++    // block app.close().
++    this.safetyScanTimer.unref();
++  }
++
++  async onModuleDestroy(): Promise<void> {
++    this.shuttingDown = true;
++    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
++    if (this.safetyScanTimer) clearInterval(this.safetyScanTimer);
++    if (this.client) {
++      try {
++        await this.client.end();
++      } catch {
++        // Already disconnected — ignore.
++      }
++      this.client = null;
++    }
++  }
++
++  private async connect(): Promise<void> {
++    if (this.shuttingDown) return;
++    const databaseUrl = this.config.get('DATABASE_URL', { infer: true });
++    if (!databaseUrl) {
++      // Dev/test scaffold runs without DATABASE_URL — log once and stay
++      // dormant. Production env-validation enforces DATABASE_URL elsewhere.
++      this.logger.warn('DATABASE_URL not set — outbox listener dormant');
++      return;
++    }
++    const client = new PgClient({ connectionString: databaseUrl });
++    client.on('notification', (msg) => {
++      if (msg.channel !== OutboxListenerService.CHANNEL) return;
++      const eventId = msg.payload;
++      if (!eventId) return;
++      // Fire-and-forget enqueue with a captured catch so a transient Redis
++      // error doesn't escape to the event-emitter's unhandled-rejection
++      // path. The next safety scan will pick the row up again.
++      this.enqueue(eventId).catch((err) => {
++        this.logger.error(`outbox enqueue failed for ${eventId}: ${String(err)}`);
++      });
++    });
++    client.on('error', (err) => {
++      // ECONNRESET, idle-in-transaction kills, PG restart — all hit here.
++      this.logger.warn(`outbox listener connection error: ${err.message}`);
++      this.scheduleReconnect();
++    });
++    client.on('end', () => {
++      if (!this.shuttingDown) {
++        this.logger.warn('outbox listener connection ended unexpectedly');
++        this.scheduleReconnect();
++      }
++    });
++
++    try {
++      await client.connect();
++      await client.query(`LISTEN ${OutboxListenerService.CHANNEL}`);
++      this.client = client;
++      this.reconnectAttempt = 0;
++      this.logger.log(`outbox listener connected and listening on '${OutboxListenerService.CHANNEL}'`);
++      // PG buffers nothing for absent listeners, so anything that landed
++      // during the disconnect window is unannounced. Catch up immediately.
++      await this.catchupScan();
++    } catch (err) {
++      this.logger.warn(`outbox listener initial connect failed: ${(err as Error).message}`);
++      try {
++        await client.end();
++      } catch {
++        // Already closed — ignore.
++      }
++      this.scheduleReconnect();
++    }
++  }
++
++  private scheduleReconnect(): void {
++    if (this.shuttingDown || this.reconnectTimer) return;
++    this.reconnectAttempt += 1;
++    const delay = Math.min(
++      2 ** Math.min(this.reconnectAttempt, 16) * 100,
++      OutboxListenerService.RECONNECT_MAX_DELAY_MS,
++    );
++    this.client = null;
++    this.reconnectTimer = setTimeout(() => {
++      this.reconnectTimer = null;
++      this.connect().catch((err) =>
++        this.logger.warn(`outbox listener reconnect attempt threw: ${String(err)}`),
++      );
++    }, delay);
++    this.reconnectTimer.unref();
++  }
++
++  private async catchupScan(): Promise<void> {
++    const rows = await this.prisma.outboxEvent.findMany({
++      where: { publishedAt: null },
++      orderBy: { createdAt: 'asc' },
++      take: OutboxListenerService.CATCHUP_BATCH,
++      select: { eventId: true },
++    });
++    for (const row of rows) {
++      await this.enqueue(row.eventId);
++    }
++    if (rows.length === OutboxListenerService.CATCHUP_BATCH) {
++      // Backlog deeper than the batch cap — schedule another scan
++      // immediately so the listener doesn't wawarning: in the working copy of 'apps/api/src/outbox/outbox-relay.consumer.ts', LF will be replaced by CRLF the next time Git touches it
+it 60s for the safety timer.
++      setImmediate(() => {
++        this.catchupScan().catch((err) =>
++          this.logger.warn(`outbox catch-up continuation failed: ${String(err)}`),
++        );
++      });
++    }
++  }
++
++  private async safetyScan(): Promise<void> {
++    if (this.shuttingDown) return;
++    await this.catchupScan();
++  }
++
++  /** Idempotent enqueue: jobId === eventId means duplicate NOTIFYs (or
++   *  catchup re-discoveries) coalesce into a single BullMQ job. */
++  private async enqueue(eventId: string): Promise<void> {
++    await this.queue.add('relay', { eventId }, { jobId: eventId });
++  }
++}
+diff --git a/apps/api/src/outbox/outbox-relay.consumer.ts b/apps/api/src/outbox/outbox-relay.consumer.ts
+new file mode 100644
+index 0000000..d22160a
+--- /dev/null
++++ b/apps/api/src/outbox/outbox-relay.consumer.ts
+@@ -0,0 +1,238 @@
++import { InjectQueue, OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
++import { Inject, Logger, Optional } from '@nestjs/common';
++import { ConfigService } from '@nestjs/config';
++import { Prisma } from '@prisma/client';
++import type { Job, Queue } from 'bullmq';
++import { Redis } from 'ioredis';
++
++import type { Env } from '../common/env.config.js';
++import { dlqOf, QUEUES, type QueueName } from '../jobs/queues.config.js';
++import { PrismaService } from '../prisma/prisma.service.js';
++
++const QUEUE = 'audit.outbox-relay' as const;
++const DLQ = dlqOf(QUEUE)!;
++/** Redis pub/sub channel the future Socket.IO server (Story 5-1) subscribes
++ *  to for realtime fanout. No subscriber today — the contract is documented
++ *  here so 5-1 lands cleanly. */
++const REALTIME_CHANNEL = 'fcm.realtime';
++
++export type OutboxRelayJobData = { eventId: string };
++
++/** Shape of an outbox payload's optional `downstreamJobs` slot — when set,
++ *  the relay enqueues each entry onto the named queue after the audit
++ *  write commits. Producer-side contract: include this in the payload to
++ *  fan out follow-up work (recalc, notify) inside the same outbox txn. */
++type DownstreamJob = { queue: QueueName; name: string; data: unknown };
++type OutboxPayload = { downstreamJobs?: DownstreamJob[] } & Record<string, unknown>;
++
++/**
++ * Outbox relay consumer (Arch §9.3 / AD-7 / Story 3-3 AC2 + AC3 + AC4).
++ *
++ * For each `event_id`:
++ *   1. Open a single Prisma transaction.
++ *   2. SELECT the outbox row WHERE event_id = ? AND published_at IS NULL.
++ *      If already published, return — idempotency layer 1.
++ *   3. INSERT a row into audit_events using the outbox event_id as
++ *      audit_events.id AND outbox.created_at as audit.occurred_at. Both
++ *      halves of the composite PK (id, occurred_at) are stable across
++ *      retries, so a duplicate INSERT raises P2002 — idempotency layer 2,
++ *      survives a partial-success crash between the audit INSERT and the
++ *      outbox UPDATE.
++ *   4. UPDATE outbox_events SET published_at = NOW() for the row.
++ *   5. After commit: enqueue downstream jobs and publish the realtime event.
++ *      These side effects are at-least-once (intentionally outside the txn)
++ *      because their consumers are idempotent (BullMQ jobId, Socket.IO
++ *      event_id dedup).
++ */
++@Processor(QUEUE, {
++  concurrency: QUEUES[QUEUE].concurrency,
++  ...(QUEUES[QUEUE].rateLimit ? { limiter: QUEUES[QUEUE].rateLimit } : {}),
++})
++export class OutboxRelayConsumer extends WorkerHost {
++  private readonly logger = new Logger(OutboxRelayConsumer.name);
++  private readonly publisher: Redis | null;
++
++  constructor(
++    @Inject(PrismaService) private readonly prisma: PrismaService,
++    @InjectQueue(DLQ) private readonly dlq: Queue,
++    @Optional() @Inject(ConfigService) private readonly config?: ConfigService<Env, true>,
++  ) {
++    super();
++    // Dedicated Redis publisher for the realtime channel. Sharing the
++    // BullMQ ioredis connection is unsafe — that connection is in
++    // subscriber/blocking mode for the queue. A separate publisher uses
++    // its own connection that auto-reconnects.
++    const redisUrl = this.config?.get('REDIS_URL', { infer: true });
++    if (redisUrl) {
++      const publisher = new Redis(redisUrl, {
++        maxRetriesPerRequest: 3,
++        enableReadyCheck: false,
++        lazyConnect: false,
++      });
++      publisher.on('error', (err) => {
++        this.logger.warn(`realtime publisher connection error: ${err.message}`);
++      });
++      this.publisher = publisher;
++    } else {
++      this.publisher = null;
++    }
++  }
++
++  async process(job: Job<OutboxRelayJobData>): Promise<void> {
++    const { eventId } = job.data;
++    if (!eventId || typeof eventId !== 'string') {
++      throw new Error('outbox-relay: job.data.eventId is required');
++    }
++
++    const committed = await this.prisma.$transaction(async (tx) => {
++      const event = await tx.outboxEvent.findUnique({ where: { eventId } });
++      if (!event) {
++        this.logger.warn(`outbox row ${eventId} not found at relay time`);
++        return null;
++      }
++      if (event.publishedAt !== null) {
++        // Idempotency layer 1: already processed.
++        return null;
++      }
++
++      // INSERT audit_events. id = event.eventId; occurred_at = event.createdAt.
++      // Both halves of the composite (id, occurred_at) PK are STABLE across
++      // relay retries because they come from the outbox row, not from NOW().
++      // A retry therefore produces a true PK collision (P2002) which we
++      // catch and treat as already-written.
++      try {
++        await tx.$executeRaw`
++          INSERT INTO "audit_events"
++            ("id", "organization_id", "actor_id", "event_type", "entity_type", "entity_id", "before", "after", "occurred_at")
++          VALUES (
++            ${event.eventId}::uuid,
++            ${event.organizationId}::uuid,
++            NULL,
++            ${event.eventType},
++            ${event.aggregateType},
++            ${event.aggregateId}::uuid,
++            NULL,
++            ${event.payload}::jsonb,
++            ${event.createdAt}
++          )
++        `;
++      } catch (err) {
++        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
++          this.logger.warn(`audit_events row for ${eventId} already exists; finalizing outbox update`);
++        } else {
++          throw err;
++        }
++      }
++
++      await tx.outboxEvent.update({
++        where: { eventId },
++        data: { publishedAt: new Date() },
++      });
++      return event;
++    });
++
++    if (!committed) {
++      // Either the row was already published (layer 1) or wasn't found.
++      // Either way no follow-up side effects.
++      return;
++    }
++
++    const payload = isOutboxPayload(committed.payload) ? committed.payload : {};
++
++    // Realtime fanout. The Socket.IO server (Story 5-1) subscribes to
++    // REALTIME_CHANNEL; until it lands, this is a no-op (Redis pub/sub
++    // drops messages with no subscribers, which is fine for at-least-once
++    // semantics — the audit log is the durable record).
++    await this.publishRealtime({
++      eventId: committed.eventId,
++      organizationId: committed.organizationId,
++      aggregateType: committed.aggregateType,
++      aggregateId: committed.aggregateId,
++      eventType: committed.eventType,
++      occurredAt: committed.createdAt.toISOString(),
++      payload,
++    });
++
++    // Downstream-job enqueue. Each downstream consumer's idempotency is
++    // its own responsibility (BullMQ jobId, recalc_jobs idempotency key,
++    // etc.) — duplicates from this at-least-once fanout are acceptable.
++    if (Array.isArray(payload.downstreamJobs)) {
++      for (const dj of payload.downstreamJobs) {
++        if (!isDownstreamJob(dj)) {
++          this.logger.warn(`outbox ${committed.eventId}: malformed downstreamJob entry — skipping`);
++          continue;
++        }
++        await this.enqueueDownstream(dj, committed.eventId).catch((err) => {
++          // Don't fail the whole relay job over a downstream enqueue blip;
++          // the audit row is already committed. The DLQ-depth metric on
++          // the downstream queue is the operator signal here.
++          this.logger.warn(
++            `outbox ${commiwarning: in the working copy of 'apps/api/src/outbox/outbox.module.ts', LF will be replaced by CRLF the next time Git touches it
+tted.eventId}: downstream enqueue to ${dj.queue} failed: ${(err as Error).message}`,
++          );
++        });
++      }
++    }
++
++    this.logger.debug(`relayed outbox event ${committed.eventId}`);
++  }
++
++  private async publishRealtime(message: unknown): Promise<void> {
++    if (!this.publisher) return;
++    try {
++      await this.publisher.publish(REALTIME_CHANNEL, JSON.stringify(message));
++    } catch (err) {
++      this.logger.warn(`realtime publish failed: ${(err as Error).message}`);
++    }
++  }
++
++  private async enqueueDownstream(dj: DownstreamJob, originatingEventId: string): Promise<void> {
++    // Defer-import: BullMQ's getQueueToken is registered per consumer via
++    // @InjectQueue. We don't have a direct reference to arbitrary queues
++    // here without per-queue injection. The downstream-jobs contract is
++    // shipped in this story; the actual enqueue path lights up once the
++    // owning module imports BullModule for the target queue. Until then,
++    // record the intent in the log so operators can see what would be
++    // enqueued. Story 4-3 (idempotency registry + recalc jobs) wires the
++    // concrete enqueue path.
++    this.logger.debug(
++      `outbox ${originatingEventId}: downstream job declared { queue:${dj.queue} name:${dj.name} } — concrete enqueue arrives with Story 4-3`,
++    );
++  }
++
++  @OnWorkerEvent('failed')
++  async onFailed(job: Job<OutboxRelayJobData>, err: Error): Promise<void> {
++    if (job.attemptsMade < (job.opts.attempts ?? 1)) return;
++    if (!job.id) {
++      this.logger.error(`outbox-relay job has no id; cannot route to ${DLQ}: ${err.message}`);
++      return;
++    }
++    const dlqJobId = `from:${job.id}`;
++    try {
++      await this.dlq.add(
++        job.name,
++        {
++          originalJobId: job.id,
++          originalQueue: QUEUE,
++          attemptsMade: job.attemptsMade,
++          failureReason: err.message,
++          data: job.data,
++        },
++        { jobId: dlqJobId, attempts: 1 },
++      );
++    } catch (dlqErr) {
++      this.logger.error(
++        `outbox-relay: failed to route ${job.id} to ${DLQ}: ${(dlqErr as Error).message}`,
++      );
++    }
++  }
++}
++
++function isOutboxPayload(raw: unknown): raw is OutboxPayload {
++  return typeof raw === 'object' && raw !== null && !Array.isArray(raw);
++}
++
++function isDownstreamJob(raw: unknown): raw is DownstreamJob {
++  if (typeof raw !== 'object' || raw === null) return false;
++  const r = raw as Record<string, unknown>;
++  return typeof r['queue'] === 'string' && typeof r['name'] === 'string';
++}
+diff --git a/apps/api/src/outbox/outbox.module.ts b/apps/api/src/outbox/outbox.module.ts
+new file mode 100644
+index 0000000..0d4b3eb
+--- /dev/null
++++ b/apps/api/src/outbox/outbox.module.ts
+@@ -0,0 +1,51 @@
++import { BullModule } from '@nestjs/bullmq';
++import { Module, type DynamicModule } from '@nestjs/common';
++
++import { ObservabilityModule } from '../observability/observability.module.js';
++import { OutboxDepthService } from './outbox-depth.service.js';
++import { OutboxListenerService } from './outbox-listener.service.js';
++import { OutboxRelayConsumer } from './outbox-relay.consumer.js';
++
++/**
++ * Outbox relay module (Arch §9.3 / AD-7 / Story 3-3).
++ *
++ * Worker mode wires:
++ *   - OutboxListenerService → maintains LISTEN outbox_new + catch-up scan +
++ *     enqueues relay jobs (idempotent jobId=eventId)
++ *   - OutboxRelayConsumer → processes one event_id per job: writes audit_events,
++ *     marks outbox_events.published_at, DLQ on terminal failure
++ *   - OutboxDepthService → emits the fcm_outbox_relay_depth Prometheus gauge
++ *
++ * Api mode wires nothing — the api never relays. Producers (controllers /
++ * services that INSERT into outbox_events) go through PrismaModule.
++ *
++ * Both modes import the BullMQ queue tokens (BullModule.registerQueueAsync
++ * is already done in JobsModule); we re-import via BullModule.registerQueue
++ * here to make the @InjectQueue('audit.outbox-relay') resolution explicit
++ * inside this module's scope.
++ */
++@Module({})
++export class OutboxModule {
++  statwarning: in the working copy of 'tests/integration/outbox-relay-roundtrip.test.mjs', LF will be replaced by CRLF the next time Git touches it
+ic register(opts: { mode: 'api' | 'worker' }): DynamicModule {
++    if (opts.mode !== 'worker') {
++      // Api mode has nothing to register — keep the module loadable so
++      // AppModule's import list stays mode-agnostic.
++      return { module: OutboxModule };
++    }
++    return {
++      module: OutboxModule,
++      imports: [
++        // MetricsService lives in ObservabilityModule — OutboxDepthService
++        // registers its gauge against it.
++        ObservabilityModule,
++        // Re-export the audit.outbox-relay + DLQ queue tokens so the
++        // listener + consumer can @InjectQueue them. JobsModule's exports
++        // bubble the underlying BullModule registrations, so this re-import
++        // is a no-op connection-wise — it only widens the DI scope.
++        BullModule.registerQueue({ name: 'audit.outbox-relay' }),
++        BullModule.registerQueue({ name: 'audit.outbox-relay.dlq' }),
++      ],
++      providers: [OutboxListenerService, OutboxRelayConsumer, OutboxDepthService],
++    };
++  }
++}
+diff --git a/tests/integration/outbox-relay-roundtrip.test.mjs b/tests/integration/outbox-relay-roundtrip.test.mjs
+new file mode 100644
+index 0000000..1e622db
+--- /dev/null
++++ b/tests/integration/outbox-relay-roundtrip.test.mjs
+@@ -0,0 +1,179 @@
++// Story 3-3 AC2 + AC3 + AC4: end-to-end outbox-relay test.
++//
++//   AC2: a row inserted into outbox_events triggers the relay which writes
++//        a matching row into audit_events and marks the outbox row
++//        published_at = NOW().
++//   AC3: idempotency — a duplicate enqueue of the same event_id does not
++//        produce a duplicate audit_events row.
++//   AC4: fcm_outbox_relay_depth gauge surfaces in the Prometheus snapshot
++//        (the actual alert rule lives in EPIC-16).
++//
++// Boots the actual NestJS worker-mode application context so the test
++// exercises OutboxListenerService + OutboxRelayConsumer + OutboxDepthService
++// — not hand-rolled BullMQ/PG. Reported as SKIPPED (not silently passed)
++// when DATABASE_URL or REDIS_URL is unset, or when the apps/api dist
++// build is absent.
++
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import { randomUUID } from 'node:crypto';
++
++const DATABASE_URL = process.env.DATABASE_URL;
++const REDIS_URL = process.env.REDIS_URL;
++const TIMEOUT_MS = 15_000;
++
++async function loadWorkerApp() {
++  const [{ NestFactory }, { AppModule }] = await Promise.all([
++    import('@nestjs/core'),
++    import('../../apps/api/dist/app.module.js'),
++  ]);
++  const appModule = AppModule.register({ mode: 'worker' });
++  const app = await NestFactory.createApplicationContext(appModule, { bufferLogs: true });
++  await app.init();
++  return app;
++}
++
++async function loadPg() {
++  try {
++    const mod = await import('pg');
++    return mod.default ?? mod;
++  } catch {
++    return null;
++  }
++}
++
++function waitUntil(predicate, timeoutMs, pollMs = 100) {
++  return new Promise((resolve, reject) => {
++    const deadline = Date.now() + timeoutMs;
++    const tick = async () => {
++      try {
++        const result = await predicate();
++        if (result) {
++          resolve(result);
++          return;
++        }
++        if (Date.now() > deadline) {
++          reject(new Error('waitUntil: predicate never returned a truthy value'));
++          return;
++        }
++        setTimeout(tick, pollMs);
++      } catch (err) {
++        reject(err);
++      }
++    };
++    void tick();
++  });
++}
++
++test('AC2 + AC3: outbox row is relayed to audit_events; duplicate enqueue is idempotent', async (t) => {
++  if (!DATABASE_URL || !REDIS_URL) {
++    t.skip('DATABASE_URL and REDIS_URL required — integration test skipped');
++    return;
++  }
++  const pg = await loadPg();
++  if (!pg) {
++    t.skip('pg not installed');
++    return;
++  }
++  let app;
++  try {
++    app = await loadWorkerApp();
++  } catch (err) {
++    if (/Cannot find module/i.test(String(err))) {
++      t.skip('apps/api dist build not present — run `pnpm --filter @fcm/api build` first');
++      return;
++    }
++    throw err;
++  }
++
++  const pgClient = new pg.Client({ connectionString: DATABASE_URL });
++  await pgClient.connect();
++  const eventId = randomUUID();
++  const orgId = randomUUID();
++  const aggId = randomUUID();
++  try {
++    // Trigger: insert an outbox row. The trigger fires pg_notify('outbox_new', event_id)
++    // at COMMIT time; the OutboxListenerService receives it and enqueues a
++    // relay job onto audit.outbox-relay.
++    await pgClient.query(
++      `INSERT INTO outbox_events (event_id, organization_id, aggregate_type, aggregate_id, event_type, payload)
++       VALUES ($1, $2, 'integration-test', $3, 'test.relay.roundtrip', '{"x":1}'::jsonb)`,
++      [eventId, orgId, aggId],
++    );
++
++    // Wait until the outbox row is published AND the audit row exists.
++    await waitUntil(
++      async () => {
++        const ob = await pgClient.query(
++          `SELECT published_at FROM outbox_events WHERE event_id = $1`,
++          [eventId],
++        );
++        const au = await pgClient.query(
++          `SELECT id FROM audit_events WHERE id = $1`,
++          [eventId],
++        );
++        return ob.rows[0]?.published_at !== null && au.rowCount === 1;
++      },
++      TIMEOUT_MS,
++    );
++
++    const auditRows = await pgClient.query(
++      `SELECT COUNT(*)::int AS n FROM audit_events WHERE id = $1`,
++      [eventId],
++    );
++    assert.equal(auditRows.rows[0].n, 1, 'exactly one audit_events row should exist (AC2)');
++
++    // AC3 idempotency: re-INSERTing the outbox row with the same event_id
++    // would fail on the PK, which is the expected outbox semantic
++    // (single-shot). Instead we re-enqueue the SAME event_id directly to
++    // the BullMQ queue and assert the audit row count stays at 1.
++    const { getQueueToken } = await import('@nestjs/bullmq');
++    const queue = app.get(getQueueToken('audit.outbox-relay'));
++    await queue.add('relay', { eventId }, { jobId: `${eventId}-rerun` });
++    // Give the consumer a moment to discover the row is already published.
++    await new Promise((resolve) => setTimeout(resolve, 500));
++    const auditRowsAfterRerun = await pgClient.query(
++      `SELECT COUNT(*)::int AS n FROM audit_events WHERE id = $1`,
++      [eventId],
++    );
++    assert.equal(
++      auditRowsAfterRerun.rows[0].n,
++      1,
++      'duplicate enqueue must NOT produce a second audit row (AC3)',
++    );
++  } finally {
++    // outbox rows are mutable — delete the test row. audit_events is
++    // append-only; the test row stays until partition pruning eventually
++    // sweeps it. That's fine for an integration test.
++    await pgClient.query(`DELETE FROM outbox_events WHERE event_id = $1`, [eventId]).catch(() => undefined);
++    await pgClient.end();
++    await app.close();
++  }
++});
++
++test('AC4: fcm_outbox_relay_depth gauge appears in the Prometheus snapshot', async (t) => {
++  if (!DATABASE_URL || !REDIS_URL) {
++    t.skip('DATABASE_URL and REDIS_URL required — integration test skipped');
++    return;
++  }
++  let app;
++  try {
++    app = await loadWorkerApp();
++  } catch (err) {
++    if (/Cannot find module/i.test(String(err))) {
++      t.skip('apps/api dist build not present');
++      return;
++    }
++    throw err;
++  }
++  try {
++    const { MetricsService } = await import('../../apps/api/dist/observability/metrics.service.js');
++    const metrics = app.get(MetricsService);
++    // OutboxDepthService samples on onModuleInit, so by the time app.init()
++    // resolved the gauge has at least one observation.
++    const { body } = await metrics.snapshot();
++    assert.match(body, /fcm_outbox_relay_depth/, 'fcm_outbox_relay_depth gauge must be in the snapshot (AC4)');
++  } finally {
++    await app.close();
++  }
++});
+diff --git a/tests/scaffold/jobs-bullmq-structure.test.mjs b/tests/scaffold/jobs-bullmq-structure.test.mjs
+index e9729d3..044f246 100644
+--- a/tests/scaffold/jobs-bullmq-structure.test.mjs
++++ b/tests/scaffold/jobs-bullmq-structure.test.mjs
+@@ -54,9 +54,16 @@ test('QueuesConfig declares the seven domain queues from Arch §7.2 + __smoke',
+   }
+ });
+ 
+-test('ACTIVE_QUEUES gates which queues open ioredis connections (4-warning: in the working copy of 'tests/scaffold/outbox-relay-structure.test.mjs', LF will be replaced by CRLF the next time Git touches it
+1 ships __smoke only)', () => {
++test('ACTIVE_QUEUES is the gate for which queues open ioredis connections', () => {
+   const src = readFileSync(resolve(apiSrc, 'jobs/queues.config.ts'), 'utf8');
+-  assert.match(src, /ACTIVE_QUEUES\s*:\s*readonly QueueName\[\]\s*=\s*\[\s*'__smoke'\s*\]/, 'Story 4-1 only opens connections for __smoke; future stories extend ACTIVE_QUEUES alongside their producer/consumer');
++  // Story 4-1 introduced __smoke; future stories extend the set alongside
++  // their producer/consumer pair. The constant must be defined as a
++  // readonly QueueName[] and must always include the smoke queue.
++  assert.match(
++    src,
++    /ACTIVE_QUEUES\s*:\s*readonly QueueName\[\]\s*=\s*\[[^\]]*'__smoke'/,
++    'ACTIVE_QUEUES must be a readonly QueueName[] including __smoke',
++  );
+ });
+ 
+ test('JobsModule.register({ mode }) gates consumers on worker mode (AC2)', () => {
+diff --git a/tests/scaffold/outbox-relay-structure.test.mjs b/tests/scaffold/outbox-relay-structure.test.mjs
+new file mode 100644
+index 0000000..28e4d59
+--- /dev/null
++++ b/tests/scaffold/outbox-relay-structure.test.mjs
+@@ -0,0 +1,94 @@
++// Scaffold guardrail: verifies the outbox relay surface defined by
++// Story 3-3 (Arch §9.3, AD-7).
++
++import { test } from 'node:test';
++import assert from 'node:assert/strict';
++import { existsSync, readFileSync } from 'node:fs';
++import { resolve } from 'node:path';
++
++const root = resolve(import.meta.dirname, '../..');
++const api = resolve(root, 'apps/api');
++const apiSrc = resolve(api, 'src');
++
++test('apps/api declares pg + @types/pg', () => {
++  const pkg = JSON.parse(readFileSync(resolve(api, 'package.json'), 'utf8'));
++  assert.ok(pkg.dependencies['pg'], 'pg must be installed (AC1 — LISTEN/NOTIFY needs raw pg client)');
++  assert.ok(pkg.devDependencies['@types/pg'], '@types/pg must be installed');
++});
++
++test('OutboxModule + OutboxListenerService + OutboxRelayConsumer + OutboxDepthService files exist', () => {
++  for (const f of [
++    'outbox.module.ts',
++    'outbox-listener.service.ts',
++    'outbox-relay.consumer.ts',
++    'outbox-depth.service.ts',
++  ]) {
++    assert.ok(existsSync(resolve(apiSrc, 'outbox', f)), `apps/api/src/outbox/${f} must exist`);
++  }
++});
++
++test('AppModule wires OutboxModule with mode threading', () => {
++  const app = readFileSync(resolve(apiSrc, 'app.module.ts'), 'utf8');
++  assert.match(app, /OutboxModule\.register\(\s*\{\s*mode:\s*opts\.mode\s*\}\s*\)/, 'AppModule must register OutboxModule with the mode (AC1)');
++});
++
++test('OutboxModule registers consumer + listener providers only in worker mode (AC1)', () => {
++  const mod = readFileSync(resolve(apiSrc, 'outbox/outbox.module.ts'), 'utf8');
++  assert.match(mod, /if\s*\(\s*opts\.mode\s*!==\s*'worker'\s*\)/, 'OutboxModule must short-circuit in api mode');
++  for (const provider of ['OutboxListenerService', 'OutboxRelayConsumer', 'OutboxDepthService']) {
++    assert.match(mod, new RegExp(provider), `OutboxModule must provide ${provider} in worker mode`);
++  }
++});
++
++test('audit.outbox-relay is in ACTIVE_QUEUES (AC1)', () => {
++  const cfg = readFileSync(resolve(apiSrc, 'jobs/queues.config.ts'), 'utf8');
++  assert.match(
++    cfg,
++    /ACTIVE_QUEUES[\s\S]*?'audit\.outbox-relay'/,
++    "audit.outbox-relay must be in ACTIVE_QUEUES so the BullModule connection is opened",
++  );
++});
++
++test('OutboxListenerService LISTENs on outbox_new + maintains catch-up + reconnect (AC1)', () => {
++  const src = readFileSync(resolve(apiSrc, 'outbox/outbox-listener.service.ts'), 'utf8');
++  assert.match(src, /from\s+'pg'/, 'must import the pg client (AC1 — LISTEN needs raw pg)');
++  assert.match(src, /LISTEN\s+\$\{[^}]*CHANNEL\}/, 'must issue LISTEN against the outbox_new channel');
++  assert.match(src, /'outbox_new'/, "channel must be 'outbox_new' (matches Story 3-2 trigger)");
++  // Idempotent enqueue: jobId === eventId. This is the only way duplicate
++  // NOTIFYs (or catch-up rediscoveries) coalesce in BullMQ before the
++  // consumer ever runs.
++  assert.match(src, /jobId:\s*eventId/, 'enqueue must use jobId=eventId for idempotency (AC3)');
++  // Catch-up scan on connect + periodic safety scan independent of NOTIFY.
++  assert.match(src, /catchupScan/, 'must perform catch-up scan to recover from missed NOTIFYs');
++  assert.match(src, /safetyScan|SAFETY_SCAN_INTERVAL_MS/, 'must run a periodic safety scan');
++  // Reconnect path with backoff cap.
++  assert.match(src, /scheduleReconnect|RECONNECT_MAX_DELAY_MS/, 'must implement bounded-backoff reconnect');
++});
++
++test('OutboxRelayConsumer is idempotent + transactional + DLQ-routed (AC2 + AC3 + AC4)', () => {
++  const src = readFileSync(resolve(apiSrc, 'outbox/outbox-relay.consumer.ts'), 'utf8');
++  assert.match(src, /@Processor\(\s*QUEUE\s*,\s*\{\s*concurrency:\s*QUEUES\[QUEUE\]\.concurrency/, 'must pass concurrency via @Processor');
++  assert.match(src, /\$transaction/, 'audit + outbox writes must run in one Prisma transaction (AC2)');
++  // Idempotency layer 1: skip when publishedAt already set.
++  assert.match(src, /publishedAt\s*!==\s*null/, 'must skip already-published rows (AC3 layer 1)');
++  // Idempotency layer 2: P2002 on duplicate audit_events INSERT is non-fatal.
++  assert.match(src, /P2002/, 'must catch duplicate audit INSERT (AC3 layer 2)');
++  // Audit INSERT writes to the partitioned audit_events table via raw SQL
++  // (audit_events has a composite (id, occurred_at) PK that Prisma can't model cleanly).
++  assert.match(src, /INSERT INTO\s+"audit_events"/, 'must INSERT into audit_events (AC2)');
++  // DLQ promotion on terminal failure.
++  assert.match(src, /@OnWorkerEvent\(\s*'failed'\s*\)/, 'must promote terminal failures to DLQ (AC4)');
++  assert.match(src, /jobId:\s*dlqJobId/, 'DLQ promotion must be idempotent via deterministic jobId');
++});
++
++test('OutboxDepthService emits fcm_outbox_relay_depth gauge (AC4)', () => {
++  const src = readFileSync(resolve(apiSrc, 'outbox/outbox-depth.service.ts'), 'utf8');
++  assert.match(src, /from\s+'prom-client'/, 'must depend on prom-client (AC4)');
++  assert.match(src, /name:\s*'fcm_outbox_relay_depth'/, "gauge must be named 'fcm_outbox_relay_depth' (AC4)");
++  assert.match(src, /publishedAt:\s*null/, 'depth = count of unpublished outbox rows');
++});
++
++test('Integration test for outbox-relay round-trip exists', () => {
++  const integ = resolve(root, 'tests/integration/outbox-relay-roundtrip.test.mjs');
++  assert.ok(existsSync(integ), 'AC2/AC3 integration test must exist');
++});

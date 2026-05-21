@@ -15,7 +15,23 @@
       "Bash(node --test tests/scaffold/)",
       "Bash(node --test \"tests/scaffold/**/*.test.mjs\")",
       "Bash(pnpm run *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Skill(bmad-dev-story)",
+      "Skill(bmad-dev-story:*)",
+      "Bash(pnpm --filter @fcm/web run typecheck)",
+      "Skill(bmad-code-review)",
+      "Skill(bmad-code-review:*)",
+      "Bash(git diff *)",
+      "Read(//tmp/**)",
+      "Read(//dev/**)",
+      "Bash(pnpm --filter @fcm/api run prisma:validate)",
+      "Bash(DATABASE_URL='postgresql://placeholder:placeholder@localhost:5432/placeholder' pnpm --filter @fcm/api run prisma:validate)",
+      "Bash(DATABASE_URL='postgresql://placeholder:placeholder@localhost:5432/placeholder' pnpm --filter @fcm/api run prisma:generate)",
+      "Bash(git -C /c/Users/emili/Desktop/Projets/FCM add -N apps/api/src/outbox/ tests/scaffold/outbox-relay-structure.test.mjs tests/integration/outbox-relay-roundtrip.test.mjs)",
+      "Bash(git -C /c/Users/emili/Desktop/Projets/FCM diff HEAD -- apps/api/src/outbox/ apps/api/src/app.module.ts apps/api/src/jobs/queues.config.ts apps/api/package.json tests/scaffold/outbox-relay-structure.test.mjs tests/scaffold/jobs-bullmq-structure.test.mjs tests/integration/outbox-relay-roundtrip.test.mjs)",
+      "Bash(git -C /c/Users/emili/Desktop/Projets/FCM add _bmad-output/implementation-artifacts/3-3-outbox-relay-worker-audit-outbox-relay.md _bmad-output/implementation-artifacts/sprint-status.yaml apps/api/package.json apps/api/src/jobs/queues.config.ts apps/api/src/app.module.ts apps/api/src/outbox/ tests/scaffold/outbox-relay-structure.test.mjs tests/integration/outbox-relay-roundtrip.test.mjs tests/scaffold/jobs-bullmq-structure.test.mjs pnpm-lock.yaml)",
+      "Bash(git -C /c/Users/emili/Desktop/Projets/FCM commit -m ' *)"
     ]
   }
 }
