@@ -16,7 +16,11 @@
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
-    "prisma:validate": "prisma validate"
+    "prisma:validate": "prisma validate",
+    "prisma:seed": "prisma db seed"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@fcm/domain-contracts": "workspace:*",
@@ -46,6 +50,7 @@
     "@types/express": "4.17.21",
     "@types/node": "20.17.10",
     "cross-env": "7.0.3",
-    "pino-pretty": "11.3.0"
+    "pino-pretty": "11.3.0",
+    "tsx": "4.19.2"
   }
 }

@@ -1,16 +1,19 @@
-// FCM API — Prisma schema (Story 1-4 baseline).
+// FCM API — Prisma schema. Story 2-1 introduces the identity baseline
+// (Organization / User / RoleAssignment) and drops the Story 1-4 placeholder.
 //
-// Real domain tables land in later epics (Identity 2.x, Audit 3.x, Configuration 7.x,
-// Evidence 8.x, Scoring 9.x, Promotion 13.x, Notifications 14.x). This file ships only
-// a placeholder `_MigrationProbe` table so the migration pipeline is exercised end-to-end
-// before any domain model adds risk.
-//
-// IMPORTANT: future schema changes MUST go through `prisma migrate dev --name <name>`
-// against a local Postgres. Do not hand-edit migration SQL except for raw-SQL concerns
-// Prisma cannot model (RLS policies, partition management, triggers — see Arch §6.5).
-// The init migration is currently hand-written ONLY because Story 1-4 ships before any
-// local Postgres is provisioned; EPIC-2's identity schema will be generated via
-// `prisma migrate dev` and will supersede this baseline.
+// Conventions:
+//   • Logical schema (Arch §6.1): no microservice DB-per-service.
+//   • UUIDs as primary keys (client-generated via @default(uuid())) so the
+//     migration role does NOT need pgcrypto / CREATE EXTENSION privilege.
+//   • Snake_case in the DB (matches Postgres convention + audit_events JSONB
+//     diffs), camelCase in TypeScript via @map / @@map.
+//   • Tenant-scoped tables carry organization_id NOT NULL (Arch §6.1) and are
+//     indexed on it (AC2). RLS policies land in Story E2.6.
+//   • Future schema changes must go through `prisma migrate dev --name <slug>`.
+//     The Story 1-4 hand-written init migration was the ONE exception (no
+//     local Postgres existed yet); Story 2-1's migration is also currently
+//     hand-written because the same constraint still applies, but EPIC-2 work
+//     past this story will use the Prisma CLI workflow.
 
 generator client {
   provider = "prisma-client-js"
@@ -21,18 +24,129 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-/// Placeholder model — validates that:
-///   • `prisma migrate dev` produces a migration
-///   • `prisma migrate deploy` applies it in CI
-///   • PrismaClient compiles and can be imported across the codebase
-/// This table is dropped by the first real-domain migration (EPIC-2's identity schema).
-/// UUIDs are generated client-side via Prisma's @default(uuid()) so the database role
-/// does not need CREATE EXTENSION privilege (some managed Postgres providers gate
-/// pgcrypto behind a superuser-only grant — Arch §12.3).
-model MigrationProbe {
-  id    String   @id @default(uuid()) @db.Uuid
-  ranAt DateTime @default(now()) @db.Timestamptz @map("ran_at")
-  note  String?
+// ─── Enums ───────────────────────────────────────────────────────────────────
 
-  @@map("_MigrationProbe")
+/// Per-organization role assignment. PRD §4.2 allows a user to hold exactly
+/// one of {EMPLOYEE, MANAGER, ADMIN} within an Organization, with the dual
+/// Admin+Employee exception (a second row in role_assignments). The composite
+/// unique on (user_id, organization_id, role) is what enforces "at most one
+/// row per role per org per user."
+enum Role {
+  EMPLOYEE
+  MANAGER
+  ADMIN
+}
+
+/// Organizational rollout mode (PRD §8.9). New organizations start in
+/// CALIBRATION — promotion endpoints reject with structured errors so HR
+/// can shadow-run scoring without committed promotions. Transition to
+/// ACTIVE is Admin-only and captures a Bootstrap Eligibility Snapshot
+/// (Story E7.10 / E13).
+enum PromotionMode {
+  CALIBRATION
+  ACTIVE
+}
+
+/// Default visibility posture per organization (PRD §8.6). Defaults to
+/// OWN_ONLY for new orgs (PRD §14.2).
+enum VisibilityDefault {
+  OWN_ONLY
+  TEAM
+  ORG_SUMMARY
+  ORG_FULL
+}
+
+/// Default approval-workflow shape per organization (PRD §8.7). Per-level
+/// overrides land in Story E7.7.
+enum ApprovalWorkflow {
+  SINGLE
+  DUAL_MANAGER
+  HR_GATE
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+/// Tenant root. Every tenant-scoped table FKs back here via organization_id.
+/// `oidc_config` is nullable so a new org can be provisioned before its OIDC
+/// integration is configured — bootstrap admin fallback credentials (Story E2.7)
+/// cover the auth gap until then.
+model Organization {
+  id                       String             @id @default(uuid()) @db.Uuid
+  slug                     String             @unique
+  name                     String
+  oidcConfig               Json?              @map("oidc_config")
+  visibilityDefault        VisibilityDefault  @default(OWN_ONLY) @map("visibility_default")
+  approvalWorkflowDefault  ApprovalWorkflow   @default(SINGLE) @map("approval_workflow_default")
+  promotionMode            PromotionMode      @default(CALIBRATION) @map("promotion_mode")
+  promotionModeChangedAt   DateTime?          @map("promotion_mode_changed_at") @db.Timestamptz
+  /// Actor who flipped promotion_mode. Nullable for the initial CALIBRATION
+  /// state (no actor) and references a user via UUID without a FK constraint
+  /// to avoid a circular dependency: the very first user is created BEFORE
+  /// they perform any rollout-mode action, but in non-bootstrap scenarios
+  /// the writer (Story E7.10) sets this to a real user_id.
+  promotionModeChangedBy   String?            @map("promotion_mode_changed_by") @db.Uuid
+  createdAt                DateTime           @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+
+  users                    User[]
+  roleAssignments          RoleAssignment[]
+
+  @@map("organizations")
+}
+
+/// Authenticated identity. PRD §4.2: a user belongs to one "home" Organization
+/// but their RBAC is fully expressed through RoleAssignment rows. The unique
+/// constraint on (organization_id, email) is what allows multi-tenant
+/// installations to have the same person at two orgs without an email
+/// collision; a future cross-org-identity story can lift this.
+model User {
+  id             String   @id @default(uuid()) @db.Uuid
+  email          String
+  displayName    String   @map("display_name")
+  organizationId String   @map("organization_id") @db.Uuid
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  roleAssignments  RoleAssignment[]
+
+  @@unique([organizationId, email])
+  @@index([organizationId])
+  @@map("users")
+}
+
+/// Per-(user, organization) role row. PRD §4.2 + Arch §10.2: a user can hold
+/// exactly one of {EMPLOYEE, MANAGER, ADMIN} within an Organization, with the
+/// dual-role carve-out for Admin+Employee enforced by the composite unique
+/// allowing two distinct (user_id, organization_id, role) tuples with the same
+/// (user_id, organization_id) prefix.
+///
+/// Soft-deactivation: a role revocation sets `deactivatedAt` rather than
+/// destroying the row, so audit_events can still reference the original
+/// role_assignment.id long after the role was rescinded. The composite-unique
+/// constraint is enforced as a PARTIAL unique index (active rows only) in the
+/// migration — Prisma doesn't model partial indexes natively, so this schema
+/// declares the unique shape and the SQL migration adds `WHERE deactivated_at
+/// IS NULL` by hand. Re-granting a previously-revoked role is therefore a
+/// fresh INSERT, not a re-activation, preserving the audit trail.
+model RoleAssignment {
+  id              String    @id @default(uuid()) @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  organizationId  String    @map("organization_id") @db.Uuid
+  role            Role
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deactivatedAt   DateTime? @map("deactivated_at") @db.Timestamptz
+
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  // The @@unique here is what Prisma uses to type composite-key accessors
+  // (upsert / findUnique). The DB-level constraint is a PARTIAL unique index
+  // (see migration.sql) so deactivated rows can coexist with a new active
+  // assignment for the same (user, org, role).
+  @@unique([userId, organizationId, role])
+  @@index([organizationId])
+  @@index([userId])
+  @@index([deactivatedAt])
+  @@map("role_assignments")
 }

@@ -38,14 +38,19 @@ test('apps/api/prisma/schema.prisma exists and targets postgresql', () => {
   assert.match(schema, /url\s*=\s*env\(\s*"DATABASE_URL"\s*\)/, 'schema must read DATABASE_URL from env (AC4)');
 });
 
-test('schema declares the _MigrationProbe table (model + @@map)', () => {
+test('schema either declares the _MigrationProbe placeholder OR a superseding domain model', () => {
+  // Story 1-4 introduced a `_MigrationProbe` placeholder so the migration
+  // pipeline could be exercised before real domain tables existed. Story 2-1
+  // (Identity schema) explicitly drops that placeholder in its migration and
+  // replaces it with Organization / User / RoleAssignment. This test accepts
+  // either state so it doesn't churn across the story boundary.
   const schema = readFileSync(resolve(prismaDir, 'schema.prisma'), 'utf8');
-  // The TABLE name must be _MigrationProbe (per AC1). Prisma model identifier conventionally
-  // starts with a capital letter (e.g., MigrationProbe) and uses @@map to set the table name.
-  assert.match(
-    schema,
-    /@@map\(\s*"_MigrationProbe"\s*\)|model\s+_MigrationProbe\s+\{/,
-    'schema must map to a table named _MigrationProbe (AC1)',
+  const hasPlaceholder = /@@map\(\s*"_MigrationProbe"\s*\)|model\s+_MigrationProbe\s+\{/.test(schema);
+  const hasIdentitySchema =
+    /model\s+Organization\s+\{/.test(schema) && /model\s+User\s+\{/.test(schema);
+  assert.ok(
+    hasPlaceholder || hasIdentitySchema,
+    'schema must either map the _MigrationProbe placeholder (pre-Story 2-1) or declare the identity schema (Story 2-1+)',
   );
 });
 

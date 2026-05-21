@@ -17,7 +17,7 @@ development_status:
   1-8-health-probes-and-worker-heartbeat: done
   1-9-secrets-management-wiring: done
   epic-2: backlog
-  2-1-identity-schema-users-organizations-role-assignments: backlog
+  2-1-identity-schema-users-organizations-role-assignments: done
   2-2-oidc-sso-login-via-openid-client-and-nextauth-session: backlog
   2-3-redis-backed-server-side-session-store-with-forced-logout: backlog
   2-4-layer-1-authguard-roles-decorator-cors-lock-down: backlog
