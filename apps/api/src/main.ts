@@ -1,3 +1,10 @@
+// CRITICAL: tracing.ts and sentry.ts MUST import before anything else so OTel's
+// auto-instrumentation and Sentry's wrappers patch modules at first require/import.
+// Reordering these is a story-1-7 regression that will produce traces with gaps
+// and Sentry events without breadcrumbs.
+import './observability/tracing.js';
+import './observability/sentry.js';
+
 import 'reflect-metadata';
 
 import type { INestApplicationContext } from '@nestjs/common';
@@ -38,10 +45,8 @@ async function bootstrap(): Promise<void> {
   // Shared graceful-shutdown path — identical for both modes (AD-1 invariant).
   // Nest's enableShutdownHooks installs SIGTERM/SIGINT/SIGHUP/SIGQUIT handlers, calls
   // app.close() which fires onModuleDestroy / onApplicationShutdown across the module
-  // graph (including LoggerModule's pino flush), then re-emits the signal so the
-  // process exits with the conventional exit code for that signal. A second signal
-  // bypasses Nest's now-removed handler and exits immediately via default behaviour,
-  // which is what operators expect when force-shutdown is required.
+  // graph (including LoggerModule's pino flush + PrismaService's $disconnect), then
+  // re-emits the signal so the process exits with the conventional exit code.
   app.enableShutdownHooks();
 }
 

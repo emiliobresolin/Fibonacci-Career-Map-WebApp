@@ -11,6 +11,14 @@ metadata:
     # controller -> Service.
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/proxy-body-size: "20m"
+    # /metrics is reachable cluster-internally via the Service; deny public access
+    # at the ingress edge so basic-auth is defense-in-depth, not the only barrier.
+    # Prometheus scrapes the Service directly, bypassing the ingress entirely.
+    nginx.ingress.kubernetes.io/server-snippet: |
+      location ~* ^/metrics(/|$) {
+        deny all;
+        return 404;
+      }
     # Default to the Let's Encrypt staging issuer so non-prod clusters don't
     # burn through the prod ACME rate limit (50 certs / 5 duplicates per week
     # per registered domain). Per-env overlay overrides to `letsencrypt-prod`

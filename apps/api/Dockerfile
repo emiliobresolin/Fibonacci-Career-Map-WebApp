@@ -84,6 +84,13 @@ COPY --from=build --chown=fcm:fcm /workspace/apps/api/prisma /app/apps/api/prism
 
 USER fcm
 
+# SERVICE_VERSION is baked at build time so observability/tracing.ts can stamp
+# every OTel span and Sentry event with the release identifier. CI passes the
+# commit SHA via --build-arg SERVICE_VERSION=$GITHUB_SHA. Without this, every
+# release would report `service.version=0.0.0` in dashboards.
+ARG SERVICE_VERSION=dev
+ENV SERVICE_VERSION=${SERVICE_VERSION}
+
 # Mode is selected at runtime via API_MODE env (api | worker). Production
 # deployments set this in the Kubernetes Deployment spec — see infra/k8s/{api,worker}/.
 # PORT is intentionally NOT set here so the K8s Deployment / app config owns it

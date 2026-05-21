@@ -67,6 +67,10 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          # Bake the commit SHA into the image as SERVICE_VERSION so OTel spans
+          # and Sentry events can be segmented by release in dashboards.
+          build-args: |
+            SERVICE_VERSION=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           provenance: true

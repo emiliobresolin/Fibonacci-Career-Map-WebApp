@@ -39,3 +39,10 @@ Tracks items from reviews that were intentionally deferred — not dismissed, no
 - **State-bucket CMK + deny-all default bucket policy.** Today's bootstrap creates the state bucket with SSE-S3 + versioning. The runbook documents the policy shape and required principals; a dedicated hardening story should make it concrete and apply it via Terraform itself.
 - **Tight Terraform provider version pin (e.g. `= 5.60.0` exact for prod, vs today's `~> 5.60`).** Revisit if provider-minor drift causes plan instability across operators.
 - **S3 server access logging wired in staging/prod.** Module supports it via `access_log_bucket`; defer until the log-bucket provisioning module lands.
+
+## Deferred from: code review of 1-7-observability-baseline (2026-05-21)
+
+- **AsyncLocalStorage-based pino mixin** so domain logs (services, BullMQ workers, schedulers — not just HTTP entry/exit) get `user_id` and `organization_id` stamped. Today these fields are static `null` in `customProps`, which only runs at HTTP request entry. Stable field names exist from day one so log-aggregator dashboards built today work transparently when real values flow. EPIC-2 (auth) is the natural place to add this.
+- **BullMQ instrumentation for OpenTelemetry.** `@opentelemetry/auto-instrumentations-node` doesn't cover BullMQ. Producer (`Queue.add`) and consumer (`Worker.process`) spans won't trace-link until a BullMQ instrumentation package is wired and `traceparent` is propagated through job payloads. Defer to EPIC-4 when BullMQ ships.
+- **Supertest integration test for `/metrics` auth.** Scaffold tests assert wiring (`@UseGuards(MetricsBasicAuthGuard)` decorator, controller path); runtime proof of 401 vs 200 belongs in a dedicated integration-test pass with a live Nest app instance.
+- **Sentry breadcrumb / console-capture tuning.** The v8 default integration set is fine for the scaffold; revisit when breadcrumb volume becomes a Sentry quota concern.
