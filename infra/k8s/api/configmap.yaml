@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: fcm-api-config
+  labels:
+    app.kubernetes.io/name: fcm
+    app.kubernetes.io/component: api
+    app.kubernetes.io/managed-by: kubectl
+data:
+  # Non-secret runtime configuration shared by the API and worker. Per-environment
+  # overrides land in a separate kustomize overlay (later story); MVP ships the
+  # baseline that maps cleanly to apps/api/.env.example.
+  #
+  # PORT is intentionally omitted — the container's listening port is fixed by
+  # the image's EXPOSE + the Deployment's containerPort + the Service's
+  # targetPort. Having it also in the ConfigMap created a precedence trap
+  # where Deployment `env` silently beats `envFrom`, leaving a "PORT changed
+  # but nothing listens there" failure mode.
+  NODE_ENV: "production"
+  LOG_LEVEL: "info"

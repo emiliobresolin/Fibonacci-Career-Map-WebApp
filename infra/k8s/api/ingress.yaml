@@ -1,0 +1,35 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: fcm-api
+  labels:
+    app.kubernetes.io/name: fcm
+    app.kubernetes.io/component: api
+  annotations:
+    # NGINX Ingress Controller — swap or extend with cert-manager / ALB annotations
+    # as the cluster choice firms up. Per Arch §12.2, ingress is managed-LB -> Ingress
+    # controller -> Service.
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: "20m"
+    # Default to the Let's Encrypt staging issuer so non-prod clusters don't
+    # burn through the prod ACME rate limit (50 certs / 5 duplicates per week
+    # per registered domain). Per-env overlay overrides to `letsencrypt-prod`
+    # for the production cluster only.
+    cert-manager.io/cluster-issuer: "letsencrypt-staging"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - api.fcm.example.com # placeholder host; per-env overlay sets the real one
+      secretName: fcm-api-tls
+  rules:
+    - host: api.fcm.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: fcm-api
+                port:
+                  name: http

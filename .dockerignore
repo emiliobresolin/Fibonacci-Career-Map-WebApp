@@ -1,0 +1,43 @@
+# Build context lives at the repo root (workflow `context: .`). Docker reads
+# .dockerignore from the context root, not from individual app dirs.
+
+# Everywhere
+node_modules
+**/node_modules
+dist
+**/dist
+.next
+**/.next
+.turbo
+.env
+.env.*
+!.env.example
+*.log
+coverage
+.git
+.gitignore
+.github
+.vscode
+.idea
+tests
+README.md
+*.md
+docs
+
+# Skip the web app entirely from the API image build context. The web app is
+# its own Vercel/CDN deploy; bundling its source/.next cache (~50MB of webpack
+# artifacts) into the API image build wastes layer cache and registry storage.
+apps/web
+
+# Skip Terraform — IaC isn't part of the API runtime.
+infra/terraform
+
+# Skip BMad outputs (planning artifacts, sharded stories, dev agent records).
+_bmad-output
+_bmad
+.claude
+.agents
+
+# Skip the per-app .dockerignore (it's been superseded by this one) so it
+# doesn't end up in the image accidentally.
+apps/api/.dockerignore

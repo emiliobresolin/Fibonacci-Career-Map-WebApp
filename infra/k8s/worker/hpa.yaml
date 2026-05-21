@@ -1,0 +1,46 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: fcm-worker
+  labels:
+    app.kubernetes.io/name: fcm
+    app.kubernetes.io/component: worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: fcm-worker
+  minReplicas: 1
+  maxReplicas: 8
+  metrics:
+    # CPU-based for now. In Story 1-7 (observability) we add a custom metric
+    # for BullMQ queue depth so scaling reacts to backlog, not just CPU.
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 60
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 75
+  behavior:
+    scaleUp:
+      # Scale workers faster than API — recalc storms (NFR-1.5: 5 min for a 500-employee
+      # org-wide recalc) need head-room quickly.
+      stabilizationWindowSeconds: 15
+      policies:
+        - type: Pods
+          value: 4
+          periodSeconds: 60
+    scaleDown:
+      # Scale down slowly — keeping a warm worker is cheap, paying connection-pool
+      # warm-up on every cluster scale-down is not.
+      stabilizationWindowSeconds: 600
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120

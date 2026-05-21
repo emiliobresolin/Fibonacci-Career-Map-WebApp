@@ -1,0 +1,124 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: fcm-api
+  labels:
+    app.kubernetes.io/name: fcm
+    app.kubernetes.io/component: api
+spec:
+  # Initial replica count; HPA (hpa.yaml) takes over as the source of truth at apply time.
+  replicas: 2
+  revisionHistoryLimit: 5
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: fcm
+      app.kubernetes.io/component: api
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: fcm
+        app.kubernetes.io/component: api
+    spec:
+      # Allow K8s 30s to drain in-flight requests before SIGKILL. NestJS
+      # enableShutdownHooks (Story 1-2) closes the HTTP server + lifecycle hooks.
+      terminationGracePeriodSeconds: 30
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: fcm-api
+          # IMAGE_TAG is filled in by the deploy step (kustomize / kubectl set image).
+          image: ghcr.io/objectedge/fcm-api:IMAGE_TAG
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3000
+              protocol: TCP
+          env:
+            - name: API_MODE
+              value: "api"
+            # DATABASE_URL + REDIS_URL come from the Secret created by the
+            # External Secrets Operator (or sealed-secrets / SOPS) that
+            # reads from AWS Secrets Manager — see Story 1-9 wiring.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fcm-api-secrets
+                  key: database_url
+            - name: REDIS_URL
+              valueFrom:
+                secretKeyRef:
+                  name: fcm-api-secrets
+                  key: redis_url
+            - name: S3_BUCKET
+              valueFrom:
+                secretKeyRef:
+                  name: fcm-api-secrets
+                  key: s3_bucket
+            - name: S3_REGION
+              valueFrom:
+                secretKeyRef:
+                  name: fcm-api-secrets
+                  key: s3_region
+          envFrom:
+            - configMapRef:
+                name: fcm-api-config
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "256Mi"
+            limits:
+              cpu: "1000m"
+              memory: "512Mi"
+          # Liveness: restart the pod if the API hangs for 30s. Readiness: pull
+          # out of service rotation immediately so rolling updates don't 502.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 30
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 2
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            failureThreshold: 12
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            - name: cache
+              mountPath: /app/.cache
+      volumes:
+        # Node + Prisma engine + pino-pretty all need a writable /tmp; without
+        # this, readOnlyRootFilesystem makes the pod crash on first write.
+        - name: tmp
+          emptyDir:
+            sizeLimit: 256Mi
+        - name: cache
+          emptyDir:
+            sizeLimit: 128Mi

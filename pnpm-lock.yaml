@@ -44,6 +44,9 @@ importers:
       pino-http:
         specifier: 10.3.0
         version: 10.3.0
+      prisma:
+        specifier: 5.22.0
+        version: 5.22.0
       reflect-metadata:
         specifier: 0.2.2
         version: 0.2.2
@@ -63,9 +66,6 @@ importers:
       pino-pretty:
         specifier: 11.3.0
         version: 11.3.0
-      prisma:
-        specifier: 5.22.0
-        version: 5.22.0
 
   apps/web:
     dependencies:

@@ -1,0 +1,108 @@
+name: Terraform plan
+
+on:
+  pull_request:
+    paths:
+      - 'infra/terraform/**'
+      - '.github/workflows/terraform-plan.yml'
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write # for AWS OIDC if/when wired
+
+concurrency:
+  group: terraform-plan-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    name: Plan ${{ matrix.env }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        env: [dev, staging, prod]
+    # Hoist the secret to an env var so step-level `if` can reference it
+    # (secrets.* is not available inside step-level if expressions).
+    env:
+      TERRAFORM_PLAN_ROLE_ARN: ${{ secrets.TERRAFORM_PLAN_ROLE_ARN }}
+    defaults:
+      run:
+        working-directory: infra/terraform/envs/${{ matrix.env }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9.8'
+          terraform_wrapper: false
+
+      # Read-only AWS credentials via OIDC. The TERRAFORM_PLAN_ROLE_ARN secret
+      # must be set on the repo for plan to actually contact AWS; if absent,
+      # this step is skipped and `terraform init` fails loudly, which is the
+      # desired signal (don't silently produce a stateless plan).
+      - name: Configure AWS credentials
+        if: env.TERRAFORM_PLAN_ROLE_ARN != ''
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ env.TERRAFORM_PLAN_ROLE_ARN }}
+          aws-region: us-east-1
+          role-session-name: github-actions-terraform-plan-${{ matrix.env }}
+
+      - name: Terraform fmt check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init
+        run: terraform init -input=false
+
+      - name: Terraform validate
+        run: terraform validate
+
+      - name: Terraform plan
+        id: plan
+        run: |
+          terraform plan -input=false -no-color -lock-timeout=5m -out=plan.tfplan -detailed-exitcode
+        continue-on-error: true
+
+      - name: Render structured plan diff
+        if: always() && steps.plan.outputs.exitcode != ''
+        run: |
+          terraform show -no-color plan.tfplan > plan.txt || true
+          echo "::group::terraform plan (${{ matrix.env }})"
+          head -c 65000 plan.txt
+          echo
+          echo "::endgroup::"
+
+      - name: Comment plan on PR
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const env = '${{ matrix.env }}';
+            let plan = '';
+            try { plan = fs.readFileSync('infra/terraform/envs/' + env + '/plan.txt', 'utf8'); }
+            catch { plan = '(plan output missing)'; }
+            const body = [
+              '### Terraform plan — `' + env + '`',
+              '<details><summary>Plan output</summary>',
+              '',
+              '```hcl',
+              plan.slice(0, 60000),
+              '```',
+              '',
+              '</details>',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: Fail if plan errored
+        if: steps.plan.outputs.exitcode == '1'
+        run: exit 1
