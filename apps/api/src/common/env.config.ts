@@ -30,6 +30,20 @@ export const envSchema = z
     // via the same External Secrets path as DATABASE_URL (Story 1-9).
     METRICS_BASIC_AUTH_USER: z.string().min(1).optional(),
     METRICS_BASIC_AUTH_PASS: z.string().min(1).optional(),
+
+    // ─── Auth / OIDC / JWT (Story 2-2) ──────────────────────────────────────────
+    // Single redirect URI for the web origin's NextAuth callback. Multi-org
+    // installations route through the same URL and disambiguate via the
+    // organization slug embedded in the OIDC `state` parameter.
+    OIDC_REDIRECT_URI: z.string().url().optional(),
+    // Symmetric HS256 signing key. Rotated via Secrets Manager (Story 1-9). When
+    // SCIM / cross-service JWT verification arrives, swap to RS256 + JWKS.
+    JWT_SIGNING_SECRET: z.string().min(32).optional(),
+    // Short-lived access tokens (15 min default per PRD FR-1.5 +- AC4) and longer
+    // refresh tokens (24 h default; refresh lives in the NextAuth session, not
+    // sent to the browser).
+    JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+    JWT_REFRESH_TTL_SECONDS: z.coerce.number().int().positive().default(24 * 60 * 60),
   })
   .superRefine((val, ctx) => {
     if (val.NODE_ENV !== 'production') return;
@@ -47,6 +61,20 @@ export const envSchema = z
         path: ['METRICS_BASIC_AUTH_USER'],
         message:
           'METRICS_BASIC_AUTH_USER and METRICS_BASIC_AUTH_PASS are required when NODE_ENV=production (the /metrics endpoint must be auth-gated)',
+      });
+    }
+    if (!val.OIDC_REDIRECT_URI) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['OIDC_REDIRECT_URI'],
+        message: 'OIDC_REDIRECT_URI is required when NODE_ENV=production',
+      });
+    }
+    if (!val.JWT_SIGNING_SECRET) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['JWT_SIGNING_SECRET'],
+        message: 'JWT_SIGNING_SECRET (≥32 chars) is required when NODE_ENV=production',
       });
     }
     // SENTRY_DSN and OTEL_EXPORTER_OTLP_ENDPOINT are NOT required in production —
