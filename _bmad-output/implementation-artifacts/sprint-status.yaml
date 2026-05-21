@@ -3,12 +3,12 @@
 # Source of truth for story lifecycle state.
 # Statuses: backlog, ready-for-dev, in-progress, code-review, done
 
-last_updated: 2026-04-19
+last_updated: 2026-05-21
 
 development_status:
   epic-1: backlog
   1-1-monorepo-workspace-scaffold: review
-  1-2-nestjs-api-scaffold-with-dual-mode-bootstrap: backlog
+  1-2-nestjs-api-scaffold-with-dual-mode-bootstrap: done
   1-3-next-js-14-app-router-scaffold-with-dark-mode-theme: backlog
   1-4-prisma-schema-baseline-and-migration-tooling: backlog
   1-5-managed-postgres-redis-and-object-storage-provisioned-via-terraform: backlog
@@ -47,6 +47,8 @@ development_status:
   epic-6: backlog
   6-1-organization-provisioning-api: backlog
   6-2-configuration-tables-tracks-levels-layers-requirements-promotion-rules: backlog
+  6-2a-employees-and-employee-assignments-tables: backlog
+  6-2b-employee-blockers-table-for-active-blocker-eligibility-check: backlog
   6-3-seedingservice-with-cdf-defaults: backlog
   6-4-first-admin-bootstrap-flow: backlog
   6-5-employee-roster-csv-bulk-import: backlog
@@ -111,8 +113,8 @@ development_status:
   13-2-promotion-recommendations-append-only-table-with-narrative-check: backlog
   13-3-calibration-flags-table-with-partial-unique-open-flag-index: backlog
   13-4-post-v1-employees-id-promotions-with-four-independent-gates: backlog
-  13-5-post-v1-promotions-id-recommend-if-workflow-uses-a-separate-recommend-step: backlog
-  13-6-hr-calibration-flag-endpoints-open-resolve: backlog
+  13-5-hr-calibration-flag-endpoints-open-resolve: backlog
+  13-6-post-v1-promotions-id-recommend-re-recommend-after-calibration-release: backlog
   13-7-approval-workflow-execution-single-dual-manager-hr-gate: backlog
   13-8-promotion-commit-level-change-score-archival-node-reposition-notifications: backlog
   13-9-track-transfer-flow: backlog
@@ -125,7 +127,7 @@ development_status:
   14-4-manager-dashboard-pending-reviews-and-stale-reviews-widgets: backlog
   14-5-admin-report-managers-ranked-by-average-evidence-review-latency: backlog
   epic-15: backlog
-  15-1-dashboard-2d-with-role-scoped-kpis: backlog
+  15-1-dashboard-2d-with-role-scoped-kpis-and-widget-slots: backlog
   15-2-analytics-2d-distribution-trends-at-risk: backlog
   15-3-full-employee-profile-2d-with-score-breakdown: backlog
   15-4-audit-log-browser-2d-with-csv-and-pdf-export: backlog

@@ -2,15 +2,34 @@
   "name": "@fcm/api",
   "version": "0.0.0",
   "private": true,
-  "description": "NestJS API + worker — modular monolith (scaffold placeholder; full init in Story 1-2)",
+  "description": "NestJS API + worker — modular monolith. Single codebase, two process modes (API_MODE=api|worker).",
   "type": "module",
+  "main": "dist/main.js",
   "scripts": {
-    "typecheck": "tsc --noEmit",
     "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/main.js",
+    "start:api": "cross-env API_MODE=api node dist/main.js",
+    "start:worker": "cross-env API_MODE=worker node dist/main.js",
     "test": "node --test"
   },
   "dependencies": {
     "@fcm/domain-contracts": "workspace:*",
-    "@fcm/scoring-core": "workspace:*"
+    "@fcm/scoring-core": "workspace:*",
+    "@nestjs/common": "10.4.15",
+    "@nestjs/config": "3.3.0",
+    "@nestjs/core": "10.4.15",
+    "@nestjs/platform-express": "10.4.15",
+    "nestjs-pino": "4.4.0",
+    "pino": "9.5.0",
+    "pino-http": "10.3.0",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.1",
+    "zod": "3.24.1"
+  },
+  "devDependencies": {
+    "@types/node": "20.17.10",
+    "cross-env": "7.0.3",
+    "pino-pretty": "11.3.0"
   }
 }

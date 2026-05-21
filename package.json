@@ -14,7 +14,7 @@
     "typecheck": "pnpm -r run typecheck",
     "lint": "pnpm -r --parallel run lint",
     "test": "pnpm -r --parallel run test",
-    "test:scaffold": "node --test \"tests/scaffold/**/*.test.mjs\""
+    "test:scaffold": "pnpm --filter @fcm/api build && node --test \"tests/scaffold/**/*.test.mjs\""
   },
   "devDependencies": {
     "typescript": "5.5.4"
