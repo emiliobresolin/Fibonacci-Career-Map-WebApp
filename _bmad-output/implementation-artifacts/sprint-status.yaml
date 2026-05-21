@@ -29,7 +29,7 @@ development_status:
   3-2-outbox-events-table-and-post-commit-listen-notify-trigger: done
   3-3-outbox-relay-worker-audit-outbox-relay: done
   3-4-event-type-taxonomy-and-auditevent-payload-contract-in-domain-contracts: done
-  3-5-role-scoped-audit-read-api-and-csv-export-endpoint-skeleton: backlog
+  3-5-role-scoped-audit-read-api-and-csv-export-endpoint-skeleton: done
   3-6-audit-partition-maintenance-scheduled-job: backlog
   epic-4: backlog
   4-1-bullmq-module-worker-bootstrap-and-per-queue-configuration: done

@@ -1,5 +1,6 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 
+import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { CommonModule } from './common/common.module.js';
 import { HealthModule } from './health/health.module.js';
@@ -33,6 +34,7 @@ export class AppModule {
         AuthModule,
         JobsModule.register({ mode: opts.mode }),
         OutboxModule.register({ mode: opts.mode }),
+        AuditModule,
         HealthModule,
       ],
     };
