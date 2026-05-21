@@ -1,6 +1,7 @@
 import { InjectQueue, OnWorkerEvent, Processor, WorkerHost } from '@nestjs/bullmq';
 import { Inject, Logger, Optional, type OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import { safeParseAuditEvent } from '@fcm/domain-contracts';
 import { Prisma } from '@prisma/client';
 import type { Job, Queue } from 'bullmq';
 import { Redis } from 'ioredis';
@@ -125,6 +126,33 @@ export class OutboxRelayConsumer extends WorkerHost implements OnModuleDestroy {
         }
         if (row.published_at !== null) {
           return null; // idempotency layer 1 (already published)
+        }
+
+        // AC3 of Story 3-4: validate the payload against the
+        // discriminated-union schema before persisting. A malformed
+        // event_type/payload fails fast and routes to DLQ rather than
+        // landing in audit_events with a shape no consumer can read.
+        const candidate = {
+          eventId: row.event_id,
+          occurredAt: row.created_at.toISOString(),
+          actorId: null,
+          organizationId: row.organization_id,
+          entityType: row.aggregate_type,
+          entityId: row.aggregate_id,
+          eventType: row.event_type,
+          ...(typeof row.payload === 'object' && row.payload !== null && !Array.isArray(row.payload)
+            ? (row.payload as Record<string, unknown>)
+            : {}),
+        };
+        const parsed = safeParseAuditEvent(candidate);
+        if (!parsed.ok) {
+          // Throwing here aborts the transaction → outbox row stays
+          // unpublished → BullMQ retries → after maxAttempts the job
+          // lands in DLQ with the validation error captured. That's the
+          // correct outcome for a poison event.
+          throw new Error(
+            `outbox-relay: payload schema validation failed for ${row.event_id} (eventType=${row.event_type}): ${parsed.error.message}`,
+          );
         }
 
         try {

@@ -185,7 +185,18 @@ importers:
         specifier: 1.0.7
         version: 1.0.7(tailwindcss@3.4.17)
 
-  packages/domain-contracts: {}
+  packages/domain-contracts:
+    dependencies:
+      zod:
+        specifier: 3.24.1
+        version: 3.24.1
+    devDependencies:
+      '@types/node':
+        specifier: 20.17.10
+        version: 20.17.10
+      tsx:
+        specifier: 4.19.2
+        version: 4.19.2
 
   packages/scoring-core: {}
 
