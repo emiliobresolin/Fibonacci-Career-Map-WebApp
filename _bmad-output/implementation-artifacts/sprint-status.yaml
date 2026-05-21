@@ -26,7 +26,7 @@ development_status:
   2-7-bootstrap-admin-fallback-credentials-and-oidc-outage-recovery-codes: backlog
   epic-3: backlog
   3-1-audit-events-table-monthly-partitioning-and-append-only-db-enforcement: done
-  3-2-outbox-events-table-and-post-commit-listen-notify-trigger: backlog
+  3-2-outbox-events-table-and-post-commit-listen-notify-trigger: done
   3-3-outbox-relay-worker-audit-outbox-relay: backlog
   3-4-event-type-taxonomy-and-auditevent-payload-contract-in-domain-contracts: backlog
   3-5-role-scoped-audit-read-api-and-csv-export-endpoint-skeleton: backlog

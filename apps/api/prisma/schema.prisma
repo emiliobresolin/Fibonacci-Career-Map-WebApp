@@ -160,6 +160,35 @@ model AuditEvent {
   @@map("audit_events")
 }
 
+/// Transactional outbox (Arch §9.3, AD-7). Every state-mutating domain
+/// operation inserts a row here **in the same DB transaction** as the
+/// business mutation. The outbox-relay worker (Story 3-3) consumes rows
+/// via Postgres LISTEN/NOTIFY (no polling), writes to `audit_events`,
+/// fans out realtime events via Redis pub/sub, enqueues downstream jobs,
+/// and finally marks `publishedAt = NOW()`.
+///
+/// pg_notify only fires at COMMIT time — if the business txn rolls back,
+/// the outbox row disappears with it and no notification is sent. That
+/// is the outbox pattern's atomicity guarantee.
+///
+/// `published_at` is the only mutable column post-insert; the relay worker
+/// uses an UPDATE to mark fanout completion. Unlike `audit_events` this
+/// table is NOT append-only — it's a transactional queue, and Story 3-6's
+/// maintenance cron archives + deletes old published rows.
+model OutboxEvent {
+  eventId         String    @id @default(uuid()) @map("event_id") @db.Uuid
+  organizationId  String    @map("organization_id") @db.Uuid
+  aggregateType   String    @map("aggregate_type")
+  aggregateId     String    @map("aggregate_id") @db.Uuid
+  eventType       String    @map("event_type")
+  payload         Json
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt     DateTime? @map("published_at") @db.Timestamptz
+
+  @@index([publishedAt(sort: Asc), createdAt])
+  @@map("outbox_events")
+}
+
 /// Per-(user, organization) role row. PRD §4.2 + Arch §10.2: a user can hold
 /// exactly one of {EMPLOYEE, MANAGER, ADMIN} within an Organization, with the
 /// dual-role carve-out for Admin+Employee enforced by the composite unique
