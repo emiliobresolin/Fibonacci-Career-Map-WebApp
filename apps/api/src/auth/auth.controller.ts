@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import {
   BadRequestException,
   Body,
@@ -12,6 +14,7 @@ import { Prisma } from '@prisma/client';
 
 import type { Env } from '../common/env.config.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { SessionStoreService } from '../sessions/session-store.service.js';
 import { JwtService } from './jwt.service.js';
 import { OidcStateStore } from './oidc-state.store.js';
 import { OidcService } from './oidc.service.js';
@@ -55,6 +58,7 @@ export class AuthController {
     @Inject(OidcStateStore) private readonly stateStore: OidcStateStore,
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(ConfigService) private readonly config: ConfigService<Env, true>,
+    @Inject(SessionStoreService) private readonly sessions: SessionStoreService,
   ) {}
 
   /**
@@ -172,9 +176,21 @@ export class AuthController {
       throw new UnauthorizedException('User is not provisioned for any role in this organization');
     }
 
+    // Mint a fresh session jti and register it in Redis (Story 2-3 AC1).
+    // Subsequent api calls validate the jti is still present; the admin
+    // revoke endpoint deletes it.
+    const jti = randomUUID();
+    const accessTtl = this.config.get('JWT_ACCESS_TTL_SECONDS');
+    await this.sessions.register({
+      organizationId: user.organizationId,
+      userId: user.id,
+      jti,
+      ttlSeconds: accessTtl,
+    });
+
     const [accessToken, refreshToken] = await Promise.all([
-      this.jwt.signAccess({ sub: user.id, org: user.organizationId, role }),
-      this.jwt.signRefresh({ sub: user.id, org: user.organizationId }),
+      this.jwt.signAccess({ sub: user.id, org: user.organizationId, role, jti }),
+      this.jwt.signRefresh({ sub: user.id, org: user.organizationId, jti }),
     ]);
 
     return {
@@ -224,9 +240,22 @@ export class AuthController {
       throw new UnauthorizedException('User has no active role; cannot refresh');
     }
 
+    // Rotate the session jti on refresh: register the new one, swap it
+    // into the JWT pair. The old jti remains in Redis until its TTL
+    // expires (refresh-token rotation with revocation-on-use is a Story
+    // 2-3 follow-up; today's MVP just minimizes the live-jti footprint).
+    const jti = randomUUID();
+    const accessTtl = this.config.get('JWT_ACCESS_TTL_SECONDS');
+    await this.sessions.register({
+      organizationId: payload.org,
+      userId: payload.sub,
+      jti,
+      ttlSeconds: accessTtl,
+    });
+
     const [accessToken, refreshToken] = await Promise.all([
-      this.jwt.signAccess({ sub: payload.sub, org: payload.org, role }),
-      this.jwt.signRefresh({ sub: payload.sub, org: payload.org }),
+      this.jwt.signAccess({ sub: payload.sub, org: payload.org, role, jti }),
+      this.jwt.signRefresh({ sub: payload.sub, org: payload.org, jti }),
     ]);
     return { accessToken, refreshToken };
   }

@@ -200,6 +200,24 @@ export const ApprovalWorkflowChangedSchema = AuditBaseSchema.extend({
   }),
 });
 
+// session.revoked — Story 2-3. Surfaced in the taxonomy because the
+// outbox relay (Story 3-3) validates every persisted event against this
+// schema, and revocation must be auditable per PRD §10.2 ("every
+// data-mutating event writes at least one audit record"). The PRD's
+// §10.1 table didn't enumerate this case but the §9 RBAC narrative
+// implies it; the variant fills the gap.
+export const SessionRevokedSchema = AuditBaseSchema.extend({
+  eventType: z.literal('session.revoked'),
+  entityType: z.literal('session'),
+  reason: z.string().nullable(),
+  before: z.object({
+    targetUserId: UuidSchema,
+    /** Count of sessions that were active for this user at revoke time. */
+    revokedSessionCount: z.number().int().nonnegative(),
+  }),
+  after: z.null(),
+});
+
 // ─── Discriminated union ────────────────────────────────────────────────────
 
 export const AuditEventSchema = z.discriminatedUnion('eventType', [
@@ -214,6 +232,7 @@ export const AuditEventSchema = z.discriminatedUnion('eventType', [
   RoleAssignmentChangedSchema,
   VisibilityRuleChangedSchema,
   ApprovalWorkflowChangedSchema,
+  SessionRevokedSchema,
 ]);
 
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
@@ -230,6 +249,7 @@ export type PromotionCompleted = z.infer<typeof PromotionCompletedSchema>;
 export type RoleAssignmentChanged = z.infer<typeof RoleAssignmentChangedSchema>;
 export type VisibilityRuleChanged = z.infer<typeof VisibilityRuleChangedSchema>;
 export type ApprovalWorkflowChanged = z.infer<typeof ApprovalWorkflowChangedSchema>;
+export type SessionRevoked = z.infer<typeof SessionRevokedSchema>;
 
 /** All declared event types — kept in sync with the discriminator union. */
 export const AUDIT_EVENT_TYPES = [
@@ -244,6 +264,7 @@ export const AUDIT_EVENT_TYPES = [
   'role_assignment.changed',
   'visibility_rule.changed',
   'approval_workflow.changed',
+  'session.revoked',
 ] as const satisfies readonly AuditEventType[];
 
 /**

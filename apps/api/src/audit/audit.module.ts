@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 
 import { AuthModule } from '../auth/auth.module.js';
+import { SessionsModule } from '../sessions/sessions.module.js';
 import { AuditController } from './audit.controller.js';
 import { AuditService } from './audit.service.js';
 
@@ -12,7 +13,7 @@ import { AuditService } from './audit.service.js';
  * Story 2-4 ships the global AuthGuard).
  */
 @Module({
-  imports: [AuthModule],
+  imports: [AuthModule, SessionsModule],
   controllers: [AuditController],
   providers: [AuditService],
   exports: [AuditService],

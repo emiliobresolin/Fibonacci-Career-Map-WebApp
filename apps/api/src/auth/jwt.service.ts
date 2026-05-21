@@ -16,6 +16,12 @@ export type AccessTokenPayload = {
   sub: string; // user.id
   org: string; // organization.id
   role: 'EMPLOYEE' | 'MANAGER' | 'ADMIN';
+  /** Session anchor (Story 2-3). The Redis session store keys on
+   *  `session:<org>:<sub>:<jti>`; the auth guard checks Redis on
+   *  every request and rejects when the key is gone (forced logout).
+   *  Optional in the type so dev/test paths without a session store
+   *  can still mint tokens. */
+  jti?: string;
 };
 
 export type RefreshTokenPayload = {
@@ -66,14 +72,19 @@ export class JwtService implements OnModuleInit {
   }
 
   async signAccess(payload: AccessTokenPayload): Promise<string> {
-    return new SignJWT({ org: payload.org, role: payload.role })
+    const builder = new SignJWT({
+      org: payload.org,
+      role: payload.role,
+      ...(payload.jti !== undefined ? { jti: payload.jti } : {}),
+    })
       .setProtectedHeader({ alg: JwtService.ALG })
       .setSubject(payload.sub)
       .setIssuer(JwtService.ISSUER)
       .setAudience(JwtService.AUDIENCE)
       .setIssuedAt()
-      .setExpirationTime(`${this.accessTtl}s`)
-      .sign(this.key);
+      .setExpirationTime(`${this.accessTtl}s`);
+    if (payload.jti !== undefined) builder.setJti(payload.jti);
+    return builder.sign(this.key);
   }
 
   async signRefresh(payload: RefreshTokenPayload): Promise<string> {
@@ -104,6 +115,7 @@ export class JwtService implements OnModuleInit {
         sub: payload.sub,
         org: payload['org'],
         role: payload['role'] as AccessTokenPayload['role'],
+        ...(typeof payload.jti === 'string' ? { jti: payload.jti } : {}),
       };
     } catch {
       throw new UnauthorizedException('Invalid or expired access token');

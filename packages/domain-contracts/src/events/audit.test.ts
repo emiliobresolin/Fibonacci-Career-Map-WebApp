@@ -109,6 +109,13 @@ const SAMPLES: Record<string, AuditEvent> = {
     before: { fromKind: 'SINGLE' },
     after: { toKind: 'DUAL_MANAGER' },
   }) as AuditEvent,
+  'session.revoked': base({
+    eventType: 'session.revoked',
+    entityType: 'session',
+    reason: 'Admin-initiated forced logout',
+    before: { targetUserId: UUID_D, revokedSessionCount: 2 },
+    after: null,
+  }) as AuditEvent,
 };
 
 test('AUDIT_EVENT_TYPES enumerates exactly the variants of the discriminated union', () => {
@@ -121,7 +128,7 @@ test('AUDIT_EVENT_TYPES enumerates exactly the variants of the discriminated uni
     [...arrayTypes].sort(),
     'AUDIT_EVENT_TYPES drift from AuditEventSchema discriminator',
   );
-  assert.equal(arrayTypes.size, 11, 'PRD §10.1 enumerates 11 event types');
+  assert.equal(arrayTypes.size, 12, 'PRD §10.1 enumerates 11 event types + session.revoked (Story 2-3)');
 });
 
 test('every PRD §10.1 event type has a valid sample + round-trips through parseAuditEvent', () => {

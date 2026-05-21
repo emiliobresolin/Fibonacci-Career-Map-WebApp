@@ -11,6 +11,7 @@ import {
 import type { Request, Response } from 'express';
 
 import { JwtService } from '../auth/jwt.service.js';
+import { SessionStoreService } from '../sessions/session-store.service.js';
 import { AuditService } from './audit.service.js';
 import type { ActorClaims, AuditListQuery } from './audit.types.js';
 
@@ -45,6 +46,7 @@ export class AuditController {
   constructor(
     @Inject(AuditService) private readonly audit: AuditService,
     @Inject(JwtService) private readonly jwt: JwtService,
+    @Inject(SessionStoreService) private readonly sessions: SessionStoreService,
   ) {}
 
   @Get()
@@ -73,7 +75,9 @@ export class AuditController {
     res.end();
   }
 
-  /** Inline JWT decode — replaced by global AuthGuard in Story 2-4. */
+  /** Inline JWT decode + session-validity check — replaced by the global
+   *  AuthGuard in Story 2-4. Story 2-3 layers the Redis check on top: if
+   *  the jti has been revoked, every subsequent API call must 401. */
   private async requireActor(req: Request): Promise<ActorClaims> {
     const header = req.headers['authorization'];
     if (!header || !header.startsWith('Bearer ')) {
@@ -81,6 +85,19 @@ export class AuditController {
     }
     const token = header.slice('Bearer '.length).trim();
     const payload = await this.jwt.verifyAccess(token);
+    // Forced-logout enforcement (Story 2-3 AC2). Tokens minted before
+    // the session-store rollout don't carry a jti — we let those
+    // through during the transition; new tokens always carry one.
+    if (payload.jti) {
+      const active = await this.sessions.isActive({
+        organizationId: payload.org,
+        userId: payload.sub,
+        jti: payload.jti,
+      });
+      if (!active) {
+        throw new UnauthorizedException('Session revoked');
+      }
+    }
     return { sub: payload.sub, organizationId: payload.org, role: payload.role };
   }
 }
