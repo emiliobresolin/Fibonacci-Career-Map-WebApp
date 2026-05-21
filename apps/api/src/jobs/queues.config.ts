@@ -107,9 +107,10 @@ export const QUEUES: Record<QueueName, QueueDef> = {
   },
 };
 
-/** Queues whose producer and/or consumer ship in Story 4-1. Future stories
- *  add their queue to this set when they ship their producer/consumer. */
-export const ACTIVE_QUEUES: readonly QueueName[] = ['__smoke'] as const;
+/** Queues whose producer and/or consumer ship now. Future stories extend
+ *  the set when they ship their producer/consumer. Stories shipping queues:
+ *  4-1 → __smoke; 3-3 → audit.outbox-relay. */
+export const ACTIVE_QUEUES: readonly QueueName[] = ['__smoke', 'audit.outbox-relay'] as const;
 
 /** Returns the DLQ name for a queue if it has one, else null. */
 export function dlqOf(name: QueueName): string | null {

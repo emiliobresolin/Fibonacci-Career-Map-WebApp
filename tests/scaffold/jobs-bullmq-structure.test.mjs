@@ -54,9 +54,16 @@ test('QueuesConfig declares the seven domain queues from Arch §7.2 + __smoke', 
   }
 });
 
-test('ACTIVE_QUEUES gates which queues open ioredis connections (4-1 ships __smoke only)', () => {
+test('ACTIVE_QUEUES is the gate for which queues open ioredis connections', () => {
   const src = readFileSync(resolve(apiSrc, 'jobs/queues.config.ts'), 'utf8');
-  assert.match(src, /ACTIVE_QUEUES\s*:\s*readonly QueueName\[\]\s*=\s*\[\s*'__smoke'\s*\]/, 'Story 4-1 only opens connections for __smoke; future stories extend ACTIVE_QUEUES alongside their producer/consumer');
+  // Story 4-1 introduced __smoke; future stories extend the set alongside
+  // their producer/consumer pair. The constant must be defined as a
+  // readonly QueueName[] and must always include the smoke queue.
+  assert.match(
+    src,
+    /ACTIVE_QUEUES\s*:\s*readonly QueueName\[\]\s*=\s*\[[^\]]*'__smoke'/,
+    'ACTIVE_QUEUES must be a readonly QueueName[] including __smoke',
+  );
 });
 
 test('JobsModule.register({ mode }) gates consumers on worker mode (AC2)', () => {

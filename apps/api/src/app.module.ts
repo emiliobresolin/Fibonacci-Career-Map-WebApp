@@ -5,6 +5,7 @@ import { CommonModule } from './common/common.module.js';
 import { HealthModule } from './health/health.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
 import { ObservabilityModule } from './observability/observability.module.js';
+import { OutboxModule } from './outbox/outbox.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 
 export type ApiMode = 'api' | 'worker';
@@ -31,6 +32,7 @@ export class AppModule {
         PrismaModule,
         AuthModule,
         JobsModule.register({ mode: opts.mode }),
+        OutboxModule.register({ mode: opts.mode }),
         HealthModule,
       ],
     };
