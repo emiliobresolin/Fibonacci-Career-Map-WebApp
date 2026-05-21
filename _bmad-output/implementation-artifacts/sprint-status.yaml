@@ -32,7 +32,7 @@ development_status:
   3-5-role-scoped-audit-read-api-and-csv-export-endpoint-skeleton: backlog
   3-6-audit-partition-maintenance-scheduled-job: backlog
   epic-4: backlog
-  4-1-bullmq-module-worker-bootstrap-and-per-queue-configuration: backlog
+  4-1-bullmq-module-worker-bootstrap-and-per-queue-configuration: done
   4-2-domain-queue-definitions: backlog
   4-3-idempotency-registry-recalc-jobs: backlog
   4-4-cron-scheduler-pattern: backlog

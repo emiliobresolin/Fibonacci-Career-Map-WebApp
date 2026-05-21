@@ -14,6 +14,11 @@ export const envSchema = z
     // without it. A `superRefine` below promotes it to required when NODE_ENV=production.
     DATABASE_URL: z.string().min(1).optional(),
 
+    // ─── Async jobs (Story 4-1) ─────────────────────────────────────────────────
+    // BullMQ on Redis 7+. Production-required (Arch §7.1); optional in dev/test
+    // so the api can boot without Redis for scaffold work.
+    REDIS_URL: z.string().min(1).optional(),
+
     // ─── Observability (Story 1-7) ──────────────────────────────────────────────
     // All optional in schema; required-in-production is enforced by superRefine.
 
@@ -53,6 +58,13 @@ export const envSchema = z
         code: z.ZodIssueCode.custom,
         path: ['DATABASE_URL'],
         message: 'DATABASE_URL is required when NODE_ENV=production',
+      });
+    }
+    if (!val.REDIS_URL) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['REDIS_URL'],
+        message: 'REDIS_URL is required when NODE_ENV=production (BullMQ queues)',
       });
     }
     if (!val.METRICS_BASIC_AUTH_USER || !val.METRICS_BASIC_AUTH_PASS) {

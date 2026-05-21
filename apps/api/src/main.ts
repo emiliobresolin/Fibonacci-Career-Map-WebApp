@@ -25,8 +25,10 @@ async function bootstrap(): Promise<void> {
 
   let app: INestApplicationContext;
 
+  const appModule = AppModule.register({ mode: env.API_MODE });
+
   if (env.API_MODE === 'api') {
-    const httpApp = await NestFactory.create<NestExpressApplication>(AppModule, {
+    const httpApp = await NestFactory.create<NestExpressApplication>(appModule, {
       bufferLogs: true,
     });
     httpApp.useLogger(httpApp.get(Logger));
@@ -35,7 +37,7 @@ async function bootstrap(): Promise<void> {
     httpApp.get(Logger).log(`api-mode ready: listening on port ${env.PORT}`, 'Bootstrap');
     app = httpApp;
   } else {
-    app = await NestFactory.createApplicationContext(AppModule, {
+    app = await NestFactory.createApplicationContext(appModule, {
       bufferLogs: true,
     });
     app.useLogger(app.get(Logger));
