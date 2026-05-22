@@ -3,7 +3,7 @@
 # Source of truth for story lifecycle state.
 # Statuses: backlog, ready-for-dev, in-progress, code-review, done
 
-last_updated: 2026-05-21
+last_updated: 2026-05-22
 
 development_status:
   epic-1: done
@@ -20,7 +20,7 @@ development_status:
   2-1-identity-schema-users-organizations-role-assignments: done
   2-2-oidc-sso-login-via-openid-client-and-nextauth-session: done
   2-3-redis-backed-server-side-session-store-with-forced-logout: done
-  2-4-layer-1-authguard-roles-decorator-cors-lock-down: backlog
+  2-4-layer-1-authguard-roles-decorator-cors-lock-down: done
   2-5-layer-2-actorcontext-propagation-and-self-approval-guard-primitive: backlog
   2-6-layer-3-postgres-row-level-security-policies-with-per-request-org-scoping: backlog
   2-7-bootstrap-admin-fallback-credentials-and-oidc-outage-recovery-codes: backlog

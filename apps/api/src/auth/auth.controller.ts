@@ -18,6 +18,7 @@ import { SessionStoreService } from '../sessions/session-store.service.js';
 import { JwtService } from './jwt.service.js';
 import { OidcStateStore } from './oidc-state.store.js';
 import { OidcService } from './oidc.service.js';
+import { Public } from './public.decorator.js';
 
 /** Request body for POST /auth/oidc/init. */
 type InitDto = {
@@ -68,6 +69,7 @@ export class AuthController {
    * authorization URL + state token to the web side.
    */
   @Post('oidc/init')
+  @Public()
   async init(@Body() dto: InitDto): Promise<{ authorizationUrl: string; state: string }> {
     if (!dto?.organizationSlug || typeof dto.organizationSlug !== 'string') {
       throw new BadRequestException('organizationSlug is required');
@@ -99,6 +101,7 @@ export class AuthController {
    * session cookie, not the JWTs themselves.
    */
   @Post('oidc/callback')
+  @Public()
   async callback(@Body() dto: CallbackDto): Promise<{
     accessToken: string;
     refreshToken: string;
@@ -217,11 +220,29 @@ export class AuthController {
    * can be replayed until its TTL expires — documented operational risk.
    */
   @Post('refresh')
+  @Public()
   async refresh(@Body() dto: RefreshDto): Promise<{ accessToken: string; refreshToken: string }> {
     if (!dto?.refreshToken || typeof dto.refreshToken !== 'string') {
       throw new BadRequestException('refreshToken is required');
     }
     const payload = await this.jwt.verifyRefresh(dto.refreshToken);
+
+    // Forced-logout enforcement on the refresh path (Story 2-4 follow-up).
+    // The /auth/refresh route is @Public() so the global guard cannot do
+    // this check for us — we MUST do it inline. Without it, a revoked
+    // user holding a still-valid refresh token can mint a fresh access
+    // JWT with a brand-new jti and effectively un-revoke themselves
+    // until the refresh TTL expires (24h default).
+    if (payload.jti) {
+      const active = await this.sessions.isActive({
+        organizationId: payload.org,
+        userId: payload.sub,
+        jti: payload.jti,
+      });
+      if (!active) {
+        throw new UnauthorizedException('Session revoked');
+      }
+    }
 
     // Belt-and-braces: confirm the user still belongs to the org claimed by
     // the refresh token. The JWT signature already binds (sub, org), but a

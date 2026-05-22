@@ -13,7 +13,7 @@ import type { NestExpressApplication } from '@nestjs/platform-express';
 import { Logger } from 'nestjs-pino';
 
 import { AppModule } from './app.module.js';
-import { validateEnv } from './common/env.config.js';
+import { parseOrigins, validateEnv } from './common/env.config.js';
 import { startWorkerHeartbeat } from './observability/worker-heartbeat.js';
 
 async function bootstrap(): Promise<void> {
@@ -33,8 +33,41 @@ async function bootstrap(): Promise<void> {
     });
     httpApp.useLogger(httpApp.get(Logger));
     httpApp.flushLogs();
+
+    // CORS lock-down (Story 2-4 AC3). Allow-list is config-driven; unlisted
+    // origins are rejected by the express `cors` middleware (Nest's default
+    // adapter). Empty list → no cross-origin requests succeed, which is the
+    // safe default in dev/test where the web hits the api via same-origin
+    // proxy through Next's rewrite. credentials:true so the web's session
+    // cookie + Authorization header are forwarded.
+    const allowedOrigins = parseOrigins(env.CORS_ALLOWED_ORIGINS);
+    httpApp.enableCors({
+      origin: (origin, cb) => {
+        // No Origin header → same-origin, server-to-server, or CLI. Always
+        // permitted; CORS only meaningfully restricts browser-driven
+        // cross-origin XHRs.
+        if (!origin) return cb(null, true);
+        const normalised = origin.replace(/\/+$/, '');
+        // Reject by calling `cb(null, false)` rather than `cb(new Error(...))`:
+        // an error propagates to Express's default handler, which returns 500
+        // with the error message in the body (and leaks the rejected origin
+        // string). `false` simply omits the Access-Control-Allow-Origin header,
+        // which is what the spec mandates and what the browser already knows
+        // how to handle — the cross-origin request silently fails CORS at the
+        // browser level rather than producing a 500 with sensitive info.
+        return cb(null, allowedOrigins.includes(normalised));
+      },
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    });
+
     await httpApp.listen(env.PORT);
-    httpApp.get(Logger).log(`api-mode ready: listening on port ${env.PORT}`, 'Bootstrap');
+    httpApp.get(Logger).log(
+      `api-mode ready: listening on port ${env.PORT} (cors allow-list: ${
+        allowedOrigins.length > 0 ? allowedOrigins.join(', ') : '<empty>'
+      })`,
+      'Bootstrap',
+    );
     app = httpApp;
   } else {
     app = await NestFactory.createApplicationContext(appModule, {

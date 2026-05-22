@@ -5,6 +5,7 @@ import { ConfigService } from '@nestjs/config';
 import { jwtVerify, SignJWT } from 'jose';
 
 import type { Env } from '../common/env.config.js';
+import { ROLES, type Role } from './auth.types.js';
 
 /**
  * Access-token payload. Carries the minimum needed for the Layer-1 AuthGuard
@@ -111,10 +112,18 @@ export class JwtService implements OnModuleInit {
       ) {
         throw new UnauthorizedException('Malformed access token');
       }
+      // Validate role against the declared enum so a token carrying a
+      // stale / forged / mis-cased role string (e.g. 'SUPERUSER') is
+      // rejected here rather than silently stamped onto req.user and
+      // potentially passing an authenticated-only route's check.
+      const role = payload['role'];
+      if (!(ROLES as readonly string[]).includes(role)) {
+        throw new UnauthorizedException('Malformed access token');
+      }
       return {
         sub: payload.sub,
         org: payload['org'],
-        role: payload['role'] as AccessTokenPayload['role'],
+        role: role as Role,
         ...(typeof payload.jti === 'string' ? { jti: payload.jti } : {}),
       };
     } catch {

@@ -10,8 +10,8 @@ import {
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
 
-import { JwtService } from '../auth/jwt.service.js';
-import { SessionStoreService } from '../sessions/session-store.service.js';
+import { Roles } from '../auth/roles.decorator.js';
+import type { RequestUser } from '../auth/auth.types.js';
 import { AuditService } from './audit.service.js';
 import type { ActorClaims, AuditListQuery } from './audit.types.js';
 
@@ -35,23 +35,20 @@ const VALID_EVENT_TYPES = new Set([
  *   GET /v1/audit-events            — cursor-paginated list (AC1)
  *   GET /v1/audit-events/export     — CSV stream (AC2)
  *
- * RBAC is enforced by `AuditService.list` based on `ActorClaims.role`.
- * The bearer-token decode happens inline here until Story 2-4 ships the
- * global AuthGuard + ActorContext primitive — at which point this
- * controller swaps the inline decode for a `@Roles()` decorator and
- * reads `req.user`.
+ * AuthN is delegated to the global JwtAuthGuard (Story 2-4). RBAC scope
+ * inside the result set (admin sees all org events, manager/employee see
+ * self-only) is enforced inside `AuditService.list` against the
+ * `actor.role`. Both roles are listed in `@Roles` so the guard returns
+ * 403 for unknown roles before we ever hit the service.
  */
 @Controller('v1/audit-events')
+@Roles('EMPLOYEE', 'MANAGER', 'ADMIN')
 export class AuditController {
-  constructor(
-    @Inject(AuditService) private readonly audit: AuditService,
-    @Inject(JwtService) private readonly jwt: JwtService,
-    @Inject(SessionStoreService) private readonly sessions: SessionStoreService,
-  ) {}
+  constructor(@Inject(AuditService) private readonly audit: AuditService) {}
 
   @Get()
   async list(@Req() req: Request, @Query() raw: Record<string, string | undefined>) {
-    const actor = await this.requireActor(req);
+    const actor = toActorClaims(req);
     const query = parseQuery(raw);
     return this.audit.list(actor, query);
   }
@@ -62,7 +59,7 @@ export class AuditController {
     @Res() res: Response,
     @Query() raw: Record<string, string | undefined>,
   ): Promise<void> {
-    const actor = await this.requireActor(req);
+    const actor = toActorClaims(req);
     const query = parseQuery(raw);
     res.setHeader('content-type', 'text/csv; charset=utf-8');
     res.setHeader('content-disposition', `attachment; filename="audit-events-${Date.now()}.csv"`);
@@ -74,32 +71,24 @@ export class AuditController {
     }
     res.end();
   }
+}
 
-  /** Inline JWT decode + session-validity check — replaced by the global
-   *  AuthGuard in Story 2-4. Story 2-3 layers the Redis check on top: if
-   *  the jti has been revoked, every subsequent API call must 401. */
-  private async requireActor(req: Request): Promise<ActorClaims> {
-    const header = req.headers['authorization'];
-    if (!header || !header.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Missing bearer token');
-    }
-    const token = header.slice('Bearer '.length).trim();
-    const payload = await this.jwt.verifyAccess(token);
-    // Forced-logout enforcement (Story 2-3 AC2). Tokens minted before
-    // the session-store rollout don't carry a jti — we let those
-    // through during the transition; new tokens always carry one.
-    if (payload.jti) {
-      const active = await this.sessions.isActive({
-        organizationId: payload.org,
-        userId: payload.sub,
-        jti: payload.jti,
-      });
-      if (!active) {
-        throw new UnauthorizedException('Session revoked');
-      }
-    }
-    return { sub: payload.sub, organizationId: payload.org, role: payload.role };
+function toActorClaims(req: Request): ActorClaims {
+  // The guard guarantees `user` is populated on every authenticated route;
+  // we still assert here so a missing-user condition is loud rather than
+  // producing a malformed Prisma query.
+  const user = (req as Request & { user?: RequestUser }).user;
+  if (!user) {
+    // Defensive: the guard should have rejected before reaching here.
+    // 401 (not 500) so a misconfigured guard surfaces as an auth failure
+    // rather than a server error that leaks an internal-invariant message.
+    throw new UnauthorizedException('Authentication context missing');
   }
+  return {
+    sub: user.user_id,
+    organizationId: user.organization_id,
+    role: user.role,
+  };
 }
 
 function parseQuery(raw: Record<string, string | undefined>): AuditListQuery {

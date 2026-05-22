@@ -3,7 +3,6 @@ import { randomUUID } from 'node:crypto';
 import {
   BadRequestException,
   Controller,
-  ForbiddenException,
   Inject,
   Param,
   Post,
@@ -12,7 +11,8 @@ import {
 } from '@nestjs/common';
 import type { Request } from 'express';
 
-import { JwtService } from '../auth/jwt.service.js';
+import { Roles } from '../auth/roles.decorator.js';
+import type { RequestUser } from '../auth/auth.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SessionStoreService } from './session-store.service.js';
 
@@ -29,20 +29,26 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
  * organizationId must match the target user's organizationId — no
  * cross-tenant revocation.
  *
- * Inline JWT decode + role check until Story 2-4 ships the global
- * AuthGuard. Same pattern the audit-read controller uses.
+ * AuthN + role check delegated to the global JwtAuthGuard + @Roles
+ * (Story 2-4); this controller now reads the verified actor from
+ * `req.user` and focuses on the revoke side-effect.
  */
 @Controller('auth/sessions')
+@Roles('ADMIN')
 export class SessionsController {
   constructor(
     @Inject(SessionStoreService) private readonly sessions: SessionStoreService,
-    @Inject(JwtService) private readonly jwt: JwtService,
     @Inject(PrismaService) private readonly prisma: PrismaService,
   ) {}
 
   @Post(':userId/revoke')
   async revoke(@Req() req: Request, @Param('userId') userId: string): Promise<{ revokedSessions: number }> {
-    const actor = await this.requireAdmin(req);
+    const actor = (req as Request & { user?: RequestUser }).user;
+    if (!actor) {
+      // Defensive: the guard should have rejected before reaching here.
+      // 401 surfaces a misconfigured guard as an auth failure rather than 500.
+      throw new UnauthorizedException('Authentication context missing');
+    }
     if (!UUID_RE.test(userId)) {
       throw new BadRequestException('userId must be a UUID');
     }
@@ -54,13 +60,13 @@ export class SessionsController {
       where: { id: userId },
       select: { id: true, organizationId: true },
     });
-    if (!target || target.organizationId !== actor.organizationId) {
+    if (!target || target.organizationId !== actor.organization_id) {
       // 404-shape to avoid leaking org membership.
       throw new BadRequestException('Unknown user');
     }
 
     const revokedCount = await this.sessions.revokeAll({
-      organizationId: actor.organizationId,
+      organizationId: actor.organization_id,
       userId,
     });
 
@@ -71,7 +77,7 @@ export class SessionsController {
     await this.prisma.outboxEvent.create({
       data: {
         eventId,
-        organizationId: actor.organizationId,
+        organizationId: actor.organization_id,
         aggregateType: 'session',
         aggregateId: userId,
         eventType: 'session.revoked',
@@ -87,18 +93,5 @@ export class SessionsController {
     });
 
     return { revokedSessions: revokedCount };
-  }
-
-  private async requireAdmin(req: Request): Promise<{ sub: string; organizationId: string; role: 'ADMIN' }> {
-    const header = req.headers['authorization'];
-    if (!header || !header.startsWith('Bearer ')) {
-      throw new UnauthorizedException('Missing bearer token');
-    }
-    const token = header.slice('Bearer '.length).trim();
-    const payload = await this.jwt.verifyAccess(token);
-    if (payload.role !== 'ADMIN') {
-      throw new ForbiddenException('Admin role required to revoke sessions');
-    }
-    return { sub: payload.sub, organizationId: payload.org, role: 'ADMIN' };
   }
 }

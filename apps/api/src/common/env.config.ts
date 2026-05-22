@@ -49,6 +49,13 @@ export const envSchema = z
     // sent to the browser).
     JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().default(900),
     JWT_REFRESH_TTL_SECONDS: z.coerce.number().int().positive().default(24 * 60 * 60),
+
+    // ─── CORS lock-down (Story 2-4) ─────────────────────────────────────────────
+    // Comma-separated allow-list of web origins permitted to call the API.
+    // Empty/unset means CORS is effectively closed (no cross-origin requests
+    // succeed) — same-origin calls from the web container are always allowed.
+    // Production env-validation below promotes this to required.
+    CORS_ALLOWED_ORIGINS: z.string().optional(),
   })
   .superRefine((val, ctx) => {
     if (val.NODE_ENV !== 'production') return;
@@ -89,6 +96,14 @@ export const envSchema = z
         message: 'JWT_SIGNING_SECRET (≥32 chars) is required when NODE_ENV=production',
       });
     }
+    if (!val.CORS_ALLOWED_ORIGINS || parseOrigins(val.CORS_ALLOWED_ORIGINS).length === 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['CORS_ALLOWED_ORIGINS'],
+        message:
+          'CORS_ALLOWED_ORIGINS must list at least one origin when NODE_ENV=production',
+      });
+    }
     // SENTRY_DSN and OTEL_EXPORTER_OTLP_ENDPOINT are NOT required in production —
     // they are graceful-degrade signals: if missing, the relevant subsystem
     // self-disables and logs a single warning at boot. Operators can opt out
@@ -96,6 +111,20 @@ export const envSchema = z
   });
 
 export type Env = z.infer<typeof envSchema>;
+
+/**
+ * Split CORS_ALLOWED_ORIGINS — a comma-separated allow-list string — into
+ * normalised origin entries. Whitespace is trimmed, empties dropped, and
+ * trailing slashes stripped so `https://app.example.com` and
+ * `https://app.example.com/` are treated identically.
+ */
+export function parseOrigins(raw: string | undefined): string[] {
+  if (!raw) return [];
+  return raw
+    .split(',')
+    .map((s) => s.trim().replace(/\/+$/, ''))
+    .filter((s) => s.length > 0);
+}
 
 export function validateEnv(raw: Record<string, unknown>): Env {
   const result = envSchema.safeParse(raw);

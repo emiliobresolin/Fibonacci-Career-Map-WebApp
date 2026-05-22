@@ -1,16 +1,32 @@
 import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
 
 import { SessionsModule } from '../sessions/sessions.module.js';
 import { SessionsController } from '../sessions/sessions.controller.js';
 import { AuthController } from './auth.controller.js';
+import { JwtAuthGuard } from './auth.guard.js';
 import { JwtService } from './jwt.service.js';
 import { OidcStateStore } from './oidc-state.store.js';
 import { OidcService } from './oidc.service.js';
 
+/**
+ * AuthModule wires the global Layer-1 AuthGuard (Story 2-4). Registering
+ * the guard via APP_GUARD here — rather than UseGuards on each controller —
+ * locks in the closed-by-default contract: a new route is authenticated
+ * unless it explicitly opts out with `@Public()`.
+ */
 @Module({
   imports: [SessionsModule],
   controllers: [AuthController, SessionsController],
-  providers: [OidcService, OidcStateStore, JwtService],
+  providers: [
+    OidcService,
+    OidcStateStore,
+    JwtService,
+    {
+      provide: APP_GUARD,
+      useClass: JwtAuthGuard,
+    },
+  ],
   exports: [JwtService],
 })
 export class AuthModule {}

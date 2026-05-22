@@ -9,8 +9,9 @@ import { SessionStoreService } from './session-store.service.js';
  *
  * The admin revoke controller (SessionsController) lives in AuthModule
  * to avoid a circular module dependency — AuthModule needs
- * SessionStoreService for login/refresh jti registration, and the
- * revoke controller needs JwtService for inline role gating.
+ * SessionStoreService for login/refresh jti registration. After Story
+ * 2-4 the role check is handled by the global `JwtAuthGuard` + `@Roles('ADMIN')`
+ * rather than inline.
  */
 @Module({
   providers: [SessionStoreService],
