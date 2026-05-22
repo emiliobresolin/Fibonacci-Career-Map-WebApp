@@ -13,6 +13,7 @@ import { OutboxModule } from './outbox/outbox.module.js';
 import { PartitionsModule } from './partitions/partitions.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
 import { RealtimeModule } from './realtime/realtime.module.js';
+import { SeedingModule } from './seeding/seeding.module.js';
 
 export type ApiMode = 'api' | 'worker';
 
@@ -44,6 +45,7 @@ export class AppModule {
         OrganizationsModule,
         ConfigurationModule,
         IdentityModule,
+        SeedingModule,
         RealtimeModule.register({ mode: opts.mode }),
         HealthModule,
       ],

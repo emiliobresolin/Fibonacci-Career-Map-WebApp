@@ -130,6 +130,14 @@ const SAMPLES: Record<string, AuditEvent> = {
     before: { employeeId: UUID_D, kind: 'PIP' },
     after: null,
   }) as AuditEvent,
+  'configuration.seeded': base({
+    eventType: 'configuration.seeded',
+    entityType: 'configuration',
+    actorId: null,
+    reason: null,
+    before: null,
+    after: { kind: 'career_track', name: 'Software Engineering' },
+  }) as AuditEvent,
   'organization.created': base({
     // Story 6-1: bootstrap-tooling provisioning event. actorId is null
     // because the org has no users when the row is created.
@@ -160,8 +168,8 @@ test('AUDIT_EVENT_TYPES enumerates exactly the variants of the discriminated uni
   );
   assert.equal(
     arrayTypes.size,
-    15,
-    'PRD §10.1 (11) + session.revoked (Story 2-3) + organization.created (Story 6-1) + blocker.opened/resolved (Story 6-2b) = 15',
+    16,
+    'PRD §10.1 (11) + session.revoked (Story 2-3) + organization.created (Story 6-1) + blocker.opened/resolved (Story 6-2b) + configuration.seeded (Story 6-3) = 16',
   );
 });
 

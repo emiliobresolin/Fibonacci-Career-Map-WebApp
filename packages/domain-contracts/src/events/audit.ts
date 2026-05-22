@@ -232,6 +232,32 @@ export const BlockerResolvedSchema = AuditBaseSchema.extend({
   after: z.null(),
 });
 
+// configuration.seeded — Story 6-3. Each seeded configuration row
+// (track / level / layer / requirement / promotion_rule) lands one
+// audit event so operators can trace the exact rows the CDF seed
+// produced for a given org. `kind` discriminates which configuration
+// surface the row belongs to; `name` is a human-readable label for
+// audit-read UI rendering. The outbox row's aggregate_id is the
+// seeded row's UUID, so audit_events.entity_id pinpoints the row.
+const SeededConfigKindSchema = z.enum([
+  'career_track',
+  'level',
+  'layer',
+  'requirement',
+  'promotion_rule',
+]);
+
+export const ConfigurationSeededSchema = AuditBaseSchema.extend({
+  eventType: z.literal('configuration.seeded'),
+  entityType: z.literal('configuration'),
+  reason: z.string().nullable(),
+  before: z.null(),
+  after: z.object({
+    kind: SeededConfigKindSchema,
+    name: z.string().min(1),
+  }),
+});
+
 // organization.created — Story 6-1. Bootstrap-tooling provisioning emits
 // this event when a new org row lands. `actorId` is null (system event —
 // the org has no users yet when this fires), and the variant carries the
@@ -287,6 +313,7 @@ export const AuditEventSchema = z.discriminatedUnion('eventType', [
   OrganizationCreatedSchema,
   BlockerOpenedSchema,
   BlockerResolvedSchema,
+  ConfigurationSeededSchema,
 ]);
 
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
@@ -307,6 +334,7 @@ export type SessionRevoked = z.infer<typeof SessionRevokedSchema>;
 export type OrganizationCreated = z.infer<typeof OrganizationCreatedSchema>;
 export type BlockerOpened = z.infer<typeof BlockerOpenedSchema>;
 export type BlockerResolved = z.infer<typeof BlockerResolvedSchema>;
+export type ConfigurationSeeded = z.infer<typeof ConfigurationSeededSchema>;
 
 /** All declared event types — kept in sync with the discriminator union. */
 export const AUDIT_EVENT_TYPES = [
@@ -325,6 +353,7 @@ export const AUDIT_EVENT_TYPES = [
   'organization.created',
   'blocker.opened',
   'blocker.resolved',
+  'configuration.seeded',
 ] as const satisfies readonly AuditEventType[];
 
 /**
