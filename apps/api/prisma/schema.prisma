@@ -92,6 +92,7 @@ model Organization {
   roleAssignments          RoleAssignment[]
   bootstrapCredential      BootstrapCredential?
   recoveryCodes            RecoveryCode[]
+  recalcJobs               RecalcJob[]
 
   @@map("organizations")
 }
@@ -248,6 +249,37 @@ model BootstrapCredential {
 
   @@unique([organizationId, username])
   @@map("bootstrap_credentials")
+}
+
+/// Recalc-job idempotency registry (Story 4-3, Arch §7.3, FR-5.9).
+/// One row per (employee_id, triggering_event_id) — duplicate recalcs
+/// for the same business event short-circuit at claim() rather than
+/// producing duplicate score snapshots.
+///
+/// `triggeringEventId` is the outbox_events.event_id that produced the
+/// recalc (evidence approval, role change, configuration change, etc.).
+/// No FK to outbox_events because outbox rows may be archived before
+/// the recalc completes (Story 3-6 maintenance cron).
+///
+/// `status` is TEXT with a DB-level CHECK constraint rather than a
+/// native enum so future variants (cancelled / superseded) don't
+/// require an ALTER TYPE migration.
+model RecalcJob {
+  id                   String    @id @default(uuid()) @db.Uuid
+  organizationId       String    @map("organization_id") @db.Uuid
+  employeeId           String    @map("employee_id") @db.Uuid
+  triggeringEventId    String    @map("triggering_event_id") @db.Uuid
+  status               String    @default("pending")
+  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  completedAt          DateTime? @map("completed_at") @db.Timestamptz
+  failureReason        String?   @map("failure_reason")
+
+  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([employeeId, triggeringEventId])
+  @@index([organizationId])
+  @@index([status])
+  @@map("recalc_jobs")
 }
 
 /// OIDC-outage recovery codes (Story 2-7, PRD FR-1.2). 10 single-use codes

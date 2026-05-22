@@ -5,6 +5,7 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import type { Env } from '../common/env.config.js';
 import { ObservabilityModule } from '../observability/observability.module.js';
 import { QueueMetricsService } from './queue-metrics.service.js';
+import { RecalcJobService } from './recalc-job.service.js';
 import { SmokeConsumer } from './smoke.consumer.js';
 import { EvidenceExpiryScanStubConsumer } from './stub-consumers/evidence-expiry-scan.consumer.js';
 import { NotificationDeliverStubConsumer } from './stub-consumers/notification-deliver.consumer.js';
@@ -122,9 +123,10 @@ export class JobsModule {
       ],
       providers: [
         QueueMetricsService,
+        RecalcJobService,
         ...(opts.mode === 'worker' ? [SmokeConsumer, ...stubConsumers] : []),
       ],
-      exports: [...queueRegistrations, QueueMetricsService],
+      exports: [...queueRegistrations, QueueMetricsService, RecalcJobService],
     };
   }
 }
