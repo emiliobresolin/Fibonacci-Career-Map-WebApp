@@ -35,6 +35,15 @@ async function bootstrap(): Promise<void> {
     httpApp.useLogger(httpApp.get(Logger));
     httpApp.flushLogs();
 
+    // Story 6-5: the bulk CSV import endpoint accepts the roster as a
+    // string field inside a JSON body. The default Nest/Express limit
+    // is 100KB, which a 1000-row roster (~150KB) overshoots. Raise to
+    // 5MB to cover realistic onboarding batches; the controller adds a
+    // tighter per-field check (MAX_CSV_BYTES) so a paste-bomb 5MB
+    // string still fails fast with a structured 400 rather than tying
+    // up the event loop in CSV parsing.
+    httpApp.useBodyParser('json', { limit: '5mb' });
+
     // CORS lock-down (Story 2-4 AC3). Allow-list is config-driven; unlisted
     // origins are rejected by the express `cors` middleware (Nest's default
     // adapter). Empty list → no cross-origin requests succeed, which is the

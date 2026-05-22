@@ -258,6 +258,28 @@ export const ConfigurationSeededSchema = AuditBaseSchema.extend({
   }),
 });
 
+// employee.imported — Story 6-5. Emitted once per row produced by the
+// bulk CSV import. Captures the user/employee row created (the
+// audit row's entity_id is the new employee.id) and the optional
+// track / level / manager assignment so an audit reader can recreate
+// the imported employee's initial state without re-reading the rows.
+// `actorId` is the importing ADMIN (audit attribution comes from the
+// @ActorContext decorator on the controller).
+export const EmployeeImportedSchema = AuditBaseSchema.extend({
+  eventType: z.literal('employee.imported'),
+  entityType: z.literal('employee'),
+  reason: z.string().nullable(),
+  before: z.null(),
+  after: z.object({
+    userId: UuidSchema,
+    email: z.string().min(1),
+    displayName: z.string().min(1),
+    careerTrackId: UuidSchema.nullable(),
+    levelId: UuidSchema.nullable(),
+    managerEmployeeId: UuidSchema.nullable(),
+  }),
+});
+
 // bootstrap_admin.provisioned — Story 6-4. The org-bootstrap flow creates
 // the very first ADMIN user (user row + role_assignment + bootstrap_credential
 // row) in one atomic transaction. The single audit event captures all three
@@ -366,6 +388,7 @@ export const AuditEventSchema = z.discriminatedUnion('eventType', [
   BootstrapAdminProvisionedSchema,
   BootstrapAdminDisabledSchema,
   RecoveryCodesProvisionedSchema,
+  EmployeeImportedSchema,
 ]);
 
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
@@ -390,6 +413,7 @@ export type ConfigurationSeeded = z.infer<typeof ConfigurationSeededSchema>;
 export type BootstrapAdminProvisioned = z.infer<typeof BootstrapAdminProvisionedSchema>;
 export type BootstrapAdminDisabled = z.infer<typeof BootstrapAdminDisabledSchema>;
 export type RecoveryCodesProvisioned = z.infer<typeof RecoveryCodesProvisionedSchema>;
+export type EmployeeImported = z.infer<typeof EmployeeImportedSchema>;
 
 /** All declared event types — kept in sync with the discriminator union. */
 export const AUDIT_EVENT_TYPES = [
@@ -412,6 +436,7 @@ export const AUDIT_EVENT_TYPES = [
   'bootstrap_admin.provisioned',
   'bootstrap_admin.disabled',
   'recovery_codes.provisioned',
+  'employee.imported',
 ] as const satisfies readonly AuditEventType[];
 
 /**

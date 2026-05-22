@@ -187,6 +187,23 @@ const SAMPLES: Record<string, AuditEvent> = {
     before: null,
     after: { count: 10 },
   }) as AuditEvent,
+  'employee.imported': base({
+    // Story 6-5: one event per row produced by the bulk CSV import.
+    // actorId is the ADMIN who initiated the import; entityId is
+    // the new employee.id so audit readers pivot from event to row.
+    eventType: 'employee.imported',
+    entityType: 'employee',
+    reason: null,
+    before: null,
+    after: {
+      userId: UUID_E,
+      email: 'jdoe@example.com',
+      displayName: 'Jane Doe',
+      careerTrackId: UUID_F,
+      levelId: UUID_D,
+      managerEmployeeId: null,
+    },
+  }) as AuditEvent,
 };
 
 test('AUDIT_EVENT_TYPES enumerates exactly the variants of the discriminated union', () => {
@@ -201,8 +218,8 @@ test('AUDIT_EVENT_TYPES enumerates exactly the variants of the discriminated uni
   );
   assert.equal(
     arrayTypes.size,
-    19,
-    'PRD §10.1 (11) + session.revoked (Story 2-3) + organization.created (Story 6-1) + blocker.opened/resolved (Story 6-2b) + configuration.seeded (Story 6-3) + bootstrap_admin.provisioned/disabled + recovery_codes.provisioned (Story 6-4) = 19',
+    20,
+    'PRD §10.1 (11) + session.revoked (Story 2-3) + organization.created (Story 6-1) + blocker.opened/resolved (Story 6-2b) + configuration.seeded (Story 6-3) + bootstrap_admin.provisioned/disabled + recovery_codes.provisioned (Story 6-4) + employee.imported (Story 6-5) = 20',
   );
 });
 
