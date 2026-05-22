@@ -4,7 +4,9 @@ import { CareerTracksController } from './career-tracks.controller.js';
 import { CareerTracksRepository } from './career-tracks.repository.js';
 import { CareerTracksService } from './career-tracks.service.js';
 import { LayersRepository } from './layers.repository.js';
+import { LevelsController } from './levels.controller.js';
 import { LevelsRepository } from './levels.repository.js';
+import { LevelsService } from './levels.service.js';
 import { PromotionRulesRepository } from './promotion-rules.repository.js';
 import { RequirementsRepository } from './requirements.repository.js';
 
@@ -27,11 +29,12 @@ import { RequirementsRepository } from './requirements.repository.js';
  * levels / layers / requirements / promotion_rules.
  */
 @Module({
-  controllers: [CareerTracksController],
+  controllers: [CareerTracksController, LevelsController],
   providers: [
     CareerTracksRepository,
     CareerTracksService,
     LevelsRepository,
+    LevelsService,
     LayersRepository,
     RequirementsRepository,
     PromotionRulesRepository,
@@ -40,6 +43,7 @@ import { RequirementsRepository } from './requirements.repository.js';
     CareerTracksRepository,
     CareerTracksService,
     LevelsRepository,
+    LevelsService,
     LayersRepository,
     RequirementsRepository,
     PromotionRulesRepository,
