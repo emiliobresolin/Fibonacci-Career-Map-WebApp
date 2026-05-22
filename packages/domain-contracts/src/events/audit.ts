@@ -258,6 +258,55 @@ export const ConfigurationSeededSchema = AuditBaseSchema.extend({
   }),
 });
 
+// bootstrap_admin.provisioned — Story 6-4. The org-bootstrap flow creates
+// the very first ADMIN user (user row + role_assignment + bootstrap_credential
+// row) in one atomic transaction. The single audit event captures all three
+// because they're inseparable: a credential without its admin user is
+// nonsense, and a role_assignment without the user is nonsense. `actorId` is
+// null — bootstrap runs as internal provisioning tooling, not as a tenant
+// user. `userId` in the payload is the new admin's user_id so audit readers
+// can pivot from the bootstrap event to the user lifecycle.
+export const BootstrapAdminProvisionedSchema = AuditBaseSchema.extend({
+  eventType: z.literal('bootstrap_admin.provisioned'),
+  entityType: z.literal('bootstrap_credential'),
+  reason: z.string().nullable(),
+  before: z.null(),
+  after: z.object({
+    userId: UuidSchema,
+    username: z.string().min(1),
+  }),
+});
+
+// bootstrap_admin.disabled — Story 6-4 AC2. Emitted when the bootstrap
+// credential is auto-retired after the first OIDC-linked ADMIN sign-in
+// (Story 2-7 AC2, wired in auth.controller.ts). `actorId` is the OIDC
+// admin who triggered the retirement; the event proves WHO caused the
+// fallback to lock.
+export const BootstrapAdminDisabledSchema = AuditBaseSchema.extend({
+  eventType: z.literal('bootstrap_admin.disabled'),
+  entityType: z.literal('bootstrap_credential'),
+  reason: z.string().nullable(),
+  before: z.object({
+    username: z.string().min(1),
+  }),
+  after: z.null(),
+});
+
+// recovery_codes.provisioned — Story 6-4. The bootstrap flow issues a
+// batch of 10 single-use OIDC-outage recovery codes. The event is
+// org-scope (no single row id) — the batch is the unit, not an
+// individual code. `entityId` is null because the batch isn't a row;
+// `count` in the payload records the batch size for audit clarity.
+export const RecoveryCodesProvisionedSchema = AuditBaseSchema.extend({
+  eventType: z.literal('recovery_codes.provisioned'),
+  entityType: z.literal('recovery_code'),
+  reason: z.string().nullable(),
+  before: z.null(),
+  after: z.object({
+    count: z.number().int().positive(),
+  }),
+});
+
 // organization.created — Story 6-1. Bootstrap-tooling provisioning emits
 // this event when a new org row lands. `actorId` is null (system event —
 // the org has no users yet when this fires), and the variant carries the
@@ -314,6 +363,9 @@ export const AuditEventSchema = z.discriminatedUnion('eventType', [
   BlockerOpenedSchema,
   BlockerResolvedSchema,
   ConfigurationSeededSchema,
+  BootstrapAdminProvisionedSchema,
+  BootstrapAdminDisabledSchema,
+  RecoveryCodesProvisionedSchema,
 ]);
 
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
@@ -335,6 +387,9 @@ export type OrganizationCreated = z.infer<typeof OrganizationCreatedSchema>;
 export type BlockerOpened = z.infer<typeof BlockerOpenedSchema>;
 export type BlockerResolved = z.infer<typeof BlockerResolvedSchema>;
 export type ConfigurationSeeded = z.infer<typeof ConfigurationSeededSchema>;
+export type BootstrapAdminProvisioned = z.infer<typeof BootstrapAdminProvisionedSchema>;
+export type BootstrapAdminDisabled = z.infer<typeof BootstrapAdminDisabledSchema>;
+export type RecoveryCodesProvisioned = z.infer<typeof RecoveryCodesProvisionedSchema>;
 
 /** All declared event types — kept in sync with the discriminator union. */
 export const AUDIT_EVENT_TYPES = [
@@ -354,6 +409,9 @@ export const AUDIT_EVENT_TYPES = [
   'blocker.opened',
   'blocker.resolved',
   'configuration.seeded',
+  'bootstrap_admin.provisioned',
+  'bootstrap_admin.disabled',
+  'recovery_codes.provisioned',
 ] as const satisfies readonly AuditEventType[];
 
 /**

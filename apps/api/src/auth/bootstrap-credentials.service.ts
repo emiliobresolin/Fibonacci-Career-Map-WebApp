@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
@@ -64,8 +64,27 @@ export class BootstrapCredentialsService {
       await tx.roleAssignment.create({
         data: { userId: user.id, organizationId, role: 'ADMIN' },
       });
-      await tx.bootstrapCredential.create({
+      const cred = await tx.bootstrapCredential.create({
         data: { organizationId, username, passwordHash },
+      });
+      // Story 6-4 AC3: emit a single `bootstrap_admin.provisioned`
+      // outbox event covering the atomic user+role+credential triple.
+      // Three rows in one logical action → one audit event. Same tx so
+      // a rollback drops both the credential and the audit row.
+      await tx.outboxEvent.create({
+        data: {
+          eventId: randomUUID(),
+          organizationId,
+          aggregateType: 'bootstrap_credential',
+          aggregateId: cred.id,
+          eventType: 'bootstrap_admin.provisioned',
+          payload: {
+            actorId: null,
+            reason: null,
+            before: null,
+            after: { userId: user.id, username },
+          },
+        },
       });
       return user.id;
     });
@@ -126,20 +145,73 @@ export class BootstrapCredentialsService {
   }
 
   /** Mark the bootstrap row as disabled. Idempotent — repeated calls
-   *  on the same row are a no-op. */
-  async disable(organizationId: string): Promise<void> {
-    const updated = await withOrgScope(this.prisma, organizationId, (tx) =>
-      tx.bootstrapCredential.updateMany({
+   *  on the same row are a no-op. Emits a `bootstrap_admin.disabled`
+   *  audit event ONLY when the row transitioned (updateMany count === 1);
+   *  a no-op call does not pollute the audit log.
+   *
+   *  Race-safety: two concurrent OIDC ADMIN sign-ins both call this
+   *  method. The transition is gated by a CONDITIONAL `updateMany`
+   *  with `where: { disabledAt: null }` — Postgres's row-locking
+   *  semantics under READ COMMITTED guarantee that exactly one
+   *  caller observes `count === 1`; the other observes `count === 0`
+   *  and skips the audit emit. A naive read-then-update would allow
+   *  both callers to pass an in-memory `if (disabledAt === null)`
+   *  guard and both would emit, producing duplicate audit history
+   *  for one logical transition.
+   *
+   *  `actorUserId` is the OIDC-authenticated admin who triggered the
+   *  retirement (Story 6-4 AC2). It's optional because legacy callers
+   *  outside the OIDC callback path (e.g. operator runbook scripts)
+   *  may not have a tenant actor; those calls record `actorId = null`. */
+  async disable(organizationId: string, actorUserId: string | null = null): Promise<void> {
+    await withOrgScope(this.prisma, organizationId, async (tx) => {
+      // Read the credential row to capture the audit-payload fields
+      // (username, id) BEFORE attempting the transition. If the row
+      // doesn't exist, nothing to disable.
+      const existing = await tx.bootstrapCredential.findUnique({
+        where: { organizationId },
+        select: { id: true, username: true },
+      });
+      if (!existing) {
+        return;
+      }
+      // Conditional update — only succeeds when disabled_at IS NULL.
+      // Postgres acquires a row lock on matching rows; under
+      // concurrent calls, exactly one transaction wins. The other
+      // sees count === 0 and bails before emitting.
+      const updated = await tx.bootstrapCredential.updateMany({
         where: { organizationId, disabledAt: null },
         data: { disabledAt: new Date() },
-      }),
-    );
-    if (updated.count > 0) {
+      });
+      if (updated.count === 0) {
+        // Already disabled by a prior call (idempotent path) OR a
+        // concurrent tx beat us to the transition. Either way, no
+        // audit emit — the winner already emitted exactly once.
+        return;
+      }
+      // Story 6-4 AC3: emit `bootstrap_admin.disabled` ONLY on the
+      // first transition. Same tx as the row update so the audit +
+      // state cannot diverge.
+      await tx.outboxEvent.create({
+        data: {
+          eventId: randomUUID(),
+          organizationId,
+          aggregateType: 'bootstrap_credential',
+          aggregateId: existing.id,
+          eventType: 'bootstrap_admin.disabled',
+          payload: {
+            actorId: actorUserId,
+            reason: null,
+            before: { username: existing.username },
+            after: null,
+          },
+        },
+      });
       this.logger.log(
-        { op: 'disable', organizationId },
+        { op: 'disable', organizationId, actorUserId },
         'bootstrap credentials disabled after OIDC admin sign-in',
       );
-    }
+    });
   }
 }
 

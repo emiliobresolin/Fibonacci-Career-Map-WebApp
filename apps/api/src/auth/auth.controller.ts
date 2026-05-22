@@ -248,8 +248,10 @@ export class AuthController {
     // session to the admin (Epic-2 verification pass MEDIUM-2 fix).
     if (role === 'ADMIN') {
       // Best-effort — a disable failure here must not abort an
-      // otherwise-successful login. Logged for triage.
-      await this.bootstrap.disable(user.organizationId).catch((err) => {
+      // otherwise-successful login. Logged for triage. Story 6-4 AC2:
+      // pass the OIDC admin's user_id so the bootstrap_admin.disabled
+      // audit event records WHO triggered the retirement.
+      await this.bootstrap.disable(user.organizationId, user.id).catch((err) => {
         this.logger.warn(
           `bootstrap.disable failed for org ${user.organizationId} after successful admin OIDC sign-in: ${(err as Error).message}`,
         );

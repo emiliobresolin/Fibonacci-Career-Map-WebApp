@@ -154,6 +154,39 @@ const SAMPLES: Record<string, AuditEvent> = {
       promotionMode: 'CALIBRATION',
     },
   }) as AuditEvent,
+  'bootstrap_admin.provisioned': base({
+    // Story 6-4: emitted when the bootstrap flow creates the first ADMIN
+    // user + credential. actorId is null — bootstrap is internal tooling,
+    // not a tenant user.
+    eventType: 'bootstrap_admin.provisioned',
+    entityType: 'bootstrap_credential',
+    actorId: null,
+    reason: null,
+    before: null,
+    after: { userId: UUID_D, username: 'bootstrap-admin@acme1234' },
+  }) as AuditEvent,
+  'bootstrap_admin.disabled': base({
+    // Story 6-4 AC2: emitted when the first OIDC-linked ADMIN sign-in
+    // auto-retires the bootstrap fallback. actorId is the OIDC admin
+    // who triggered the retirement.
+    eventType: 'bootstrap_admin.disabled',
+    entityType: 'bootstrap_credential',
+    reason: null,
+    before: { username: 'bootstrap-admin@acme1234' },
+    after: null,
+  }) as AuditEvent,
+  'recovery_codes.provisioned': base({
+    // Story 6-4: bootstrap-batch issuance of 10 OIDC-outage recovery
+    // codes. Org-scope event — entityId is null because the batch is
+    // not a single row.
+    eventType: 'recovery_codes.provisioned',
+    entityType: 'recovery_code',
+    actorId: null,
+    entityId: null,
+    reason: null,
+    before: null,
+    after: { count: 10 },
+  }) as AuditEvent,
 };
 
 test('AUDIT_EVENT_TYPES enumerates exactly the variants of the discriminated union', () => {
@@ -168,8 +201,8 @@ test('AUDIT_EVENT_TYPES enumerates exactly the variants of the discriminated uni
   );
   assert.equal(
     arrayTypes.size,
-    16,
-    'PRD §10.1 (11) + session.revoked (Story 2-3) + organization.created (Story 6-1) + blocker.opened/resolved (Story 6-2b) + configuration.seeded (Story 6-3) = 16',
+    19,
+    'PRD §10.1 (11) + session.revoked (Story 2-3) + organization.created (Story 6-1) + blocker.opened/resolved (Story 6-2b) + configuration.seeded (Story 6-3) + bootstrap_admin.provisioned/disabled + recovery_codes.provisioned (Story 6-4) = 19',
   );
 });
 

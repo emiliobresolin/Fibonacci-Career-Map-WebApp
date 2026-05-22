@@ -51,7 +51,7 @@ development_status:
   6-2a-employees-and-employee-assignments-tables: done
   6-2b-employee-blockers-table-for-active-blocker-eligibility-check: done
   6-3-seedingservice-with-cdf-defaults: done
-  6-4-first-admin-bootstrap-flow: backlog
+  6-4-first-admin-bootstrap-flow: done
   6-5-employee-roster-csv-bulk-import: backlog
   6-6-integration-test-seed-assign-fetch-map-employees-happy-path: backlog
   epic-7: backlog

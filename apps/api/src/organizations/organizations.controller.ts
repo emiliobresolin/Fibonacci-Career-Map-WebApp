@@ -1,6 +1,11 @@
 import { Body, Controller, HttpCode, Inject, Post, UseGuards } from '@nestjs/common';
 
 import { Public } from '../auth/public.decorator.js';
+import {
+  BootstrapService,
+  type BootstrapInput,
+  type BootstrapResult,
+} from './bootstrap.service.js';
 import { InternalProvisioningGuard } from './internal-provisioning.guard.js';
 import {
   OrganizationsService,
@@ -9,6 +14,7 @@ import {
 } from './organizations.service.js';
 
 type ProvisionDto = ProvisionInput;
+type BootstrapDto = BootstrapInput;
 
 /**
  * Story 6-1 — POST /v1/organizations.
@@ -29,6 +35,7 @@ type ProvisionDto = ProvisionInput;
 export class OrganizationsController {
   constructor(
     @Inject(OrganizationsService) private readonly organizations: OrganizationsService,
+    @Inject(BootstrapService) private readonly bootstrapService: BootstrapService,
   ) {}
 
   @Post()
@@ -37,6 +44,34 @@ export class OrganizationsController {
   @HttpCode(201)
   async create(@Body() dto: ProvisionDto): Promise<ProvisionedOrganization> {
     return this.organizations.provision({
+      slug: dto?.slug ?? '',
+      name: dto?.name ?? '',
+    });
+  }
+
+  /**
+   * Story 6-4 — first-admin bootstrap endpoint.
+   *
+   * One-shot composite: provision org + seed CDF + create bootstrap admin
+   * + issue 10 recovery codes. Same `@Public()` + `InternalProvisioningGuard`
+   * gate as the bare-org provisioning endpoint above: at bootstrap time
+   * the org has no users yet, so the global JwtAuthGuard cannot
+   * authenticate the caller. The shared-secret token is the only auth.
+   *
+   * AC2 enforcement: a second bootstrap call for the same slug surfaces
+   * as 409 from `OrganizationsService.provision` BEFORE any other writes
+   * happen.
+   *
+   * Returns plaintext credentials + 10 recovery codes ONCE. The operator
+   * hand-offs the secrets to the first admin via a secure channel; the
+   * DB stores only the scrypt hashes.
+   */
+  @Post('bootstrap')
+  @Public()
+  @UseGuards(InternalProvisioningGuard)
+  @HttpCode(201)
+  async createWithBootstrap(@Body() dto: BootstrapDto): Promise<BootstrapResult> {
+    return this.bootstrapService.bootstrap({
       slug: dto?.slug ?? '',
       name: dto?.name ?? '',
     });

@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 
 import { Inject, Injectable, Logger } from '@nestjs/common';
 
@@ -53,11 +53,38 @@ export class RecoveryCodesService {
       const hash = await hashPassword(code);
       hashes.push(hash);
     }
-    await withOrgScope(this.prisma, organizationId, (tx) =>
-      tx.recoveryCode.createMany({
+    await withOrgScope(this.prisma, organizationId, async (tx) => {
+      await tx.recoveryCode.createMany({
         data: hashes.map((codeHash) => ({ organizationId, codeHash })),
-      }),
-    );
+      });
+      // Story 6-4 AC3: emit a single `recovery_codes.provisioned`
+      // outbox event for the batch. The batch is the unit, not an
+      // individual code — leaking each code's id in audit would
+      // be a security smell (the codes are sensitive). Same tx as
+      // the createMany so a rollback drops both.
+      await tx.outboxEvent.create({
+        data: {
+          eventId: randomUUID(),
+          organizationId,
+          aggregateType: 'recovery_code',
+          // Batch-scope event: aggregate_id has no single-row meaning,
+          // so we use the org id as a stable proxy. The matching
+          // audit_events.entity_id is then forced to null by the
+          // outbox-relay payload reconstruction (see
+          // outbox-relay.consumer.ts) — the payload-level entityId
+          // override below is what the relay actually persists.
+          aggregateId: organizationId,
+          eventType: 'recovery_codes.provisioned',
+          payload: {
+            actorId: null,
+            entityId: null,
+            reason: null,
+            before: null,
+            after: { count: hashes.length },
+          },
+        },
+      });
+    });
     this.logger.log(
       { op: 'provision_batch', organizationId, count: hashes.length },
       'recovery codes provisioned',
