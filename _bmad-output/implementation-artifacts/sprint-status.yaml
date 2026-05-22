@@ -54,8 +54,8 @@ development_status:
   6-4-first-admin-bootstrap-flow: done
   6-5-employee-roster-csv-bulk-import: done
   6-6-integration-test-seed-assign-fetch-map-employees-happy-path: done
-  epic-7: backlog
-  7-1-career-tracks-crud-api-audit: backlog
+  epic-7: in-progress
+  7-1-career-tracks-crud-api-audit: done
   7-2-levels-crud-with-non-overlapping-band-enforcement: backlog
   7-3-layers-crud: backlog
   7-4-requirements-crud-weight-mandatory-flag-evidence-type-expiry: backlog
