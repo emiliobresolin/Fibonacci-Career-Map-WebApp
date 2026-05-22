@@ -90,6 +90,8 @@ model Organization {
 
   users                    User[]
   roleAssignments          RoleAssignment[]
+  bootstrapCredential      BootstrapCredential?
+  recoveryCodes            RecoveryCode[]
 
   @@map("organizations")
 }
@@ -223,4 +225,47 @@ model RoleAssignment {
   @@index([userId])
   @@index([deactivatedAt])
   @@map("role_assignments")
+}
+
+/// Bootstrap-admin credentials (Story 2-7, PRD FR-1.2). Used to log in
+/// the first organization admin before OIDC is configured AND as a
+/// fallback during OIDC outages. Self-disables once the first OIDC-linked
+/// admin sign-in succeeds — `disabledAt` is set inside the OIDC callback
+/// transaction. A disabled row is left in place for forensics.
+///
+/// `passwordHash` is a scrypt-format string (see BootstrapCredentialsService);
+/// the plaintext password is surfaced ONCE at provisioning and never stored.
+model BootstrapCredential {
+  id              String    @id @default(uuid()) @db.Uuid
+  organizationId  String    @unique @map("organization_id") @db.Uuid
+  username        String
+  passwordHash    String    @map("password_hash")
+  disabledAt      DateTime? @map("disabled_at") @db.Timestamptz
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, username])
+  @@map("bootstrap_credentials")
+}
+
+/// OIDC-outage recovery codes (Story 2-7, PRD FR-1.2). 10 single-use codes
+/// generated per organization at bootstrap, bound to admin role only.
+/// `codeHash` is a scrypt-format hash of the plaintext code; the plaintext
+/// is surfaced ONCE at issuance and is irretrievable thereafter. A code
+/// self-burns on redemption — `redeemedAt` + `redeemedByUserId` are set
+/// and the row is permanently unusable.
+model RecoveryCode {
+  id                String    @id @default(uuid()) @db.Uuid
+  organizationId    String    @map("organization_id") @db.Uuid
+  codeHash          String    @map("code_hash")
+  redeemedAt        DateTime? @map("redeemed_at") @db.Timestamptz
+  redeemedByUserId  String?   @map("redeemed_by_user_id") @db.Uuid
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("recovery_codes")
 }

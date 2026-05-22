@@ -16,10 +16,12 @@ import type { Env } from '../common/env.config.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { withOrgScope } from '../prisma/rls.helpers.js';
 import { SessionStoreService } from '../sessions/session-store.service.js';
+import { BootstrapCredentialsService } from './bootstrap-credentials.service.js';
 import { JwtService } from './jwt.service.js';
 import { OidcStateStore } from './oidc-state.store.js';
 import { OidcService } from './oidc.service.js';
 import { Public } from './public.decorator.js';
+import { RecoveryCodesService } from './recovery-codes.service.js';
 
 /** Request body for POST /auth/oidc/init. */
 type InitDto = {
@@ -42,6 +44,23 @@ type RefreshDto = {
   refreshToken: string;
 };
 
+/** Request body for POST /auth/bootstrap-login. Used to log in the
+ *  first-run admin before OIDC is configured AND during OIDC outage as
+ *  a fallback (Story 2-7 AC1). */
+type BootstrapLoginDto = {
+  organizationSlug: string;
+  username: string;
+  password: string;
+};
+
+/** Request body for POST /auth/recovery-redeem. Single-use code path
+ *  for admins to recover access when OIDC is down (Story 2-7 AC3). */
+type RecoveryRedeemDto = {
+  organizationSlug: string;
+  email: string;
+  recoveryCode: string;
+};
+
 /** PRD §4.2 precedence: ADMIN > MANAGER > EMPLOYEE. Postgres native enums
  *  sort by declared ordinal, so the Prisma `orderBy: { role: 'desc' }` shape
  *  WOULD work — but only as long as the schema enum declaration order
@@ -61,6 +80,8 @@ export class AuthController {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(ConfigService) private readonly config: ConfigService<Env, true>,
     @Inject(SessionStoreService) private readonly sessions: SessionStoreService,
+    @Inject(BootstrapCredentialsService) private readonly bootstrap: BootstrapCredentialsService,
+    @Inject(RecoveryCodesService) private readonly recovery: RecoveryCodesService,
   ) {}
 
   /**
@@ -193,6 +214,15 @@ export class AuthController {
       throw new UnauthorizedException('User is not provisioned for any role in this organization');
     }
 
+    // Story 2-7 AC2: once the first OIDC-linked admin successfully signs
+    // in for this org, the bootstrap password fallback self-disables.
+    // Idempotent — subsequent admin sign-ins are no-ops at the DB layer.
+    // Non-admin sign-ins do NOT disable bootstrap (a manager logging in
+    // first shouldn't lock admins out of the fallback path).
+    if (role === 'ADMIN') {
+      await this.bootstrap.disable(user.organizationId);
+    }
+
     // Mint a fresh session jti and register it in Redis (Story 2-3 AC1).
     // Subsequent api calls validate the jti is still present; the admin
     // revoke endpoint deletes it.
@@ -322,6 +352,157 @@ export class AuthController {
       this.jwt.signRefresh({ sub: payload.sub, org: payload.org, jti }),
     ]);
     return { accessToken, refreshToken };
+  }
+
+  /**
+   * Bootstrap-admin fallback login (Story 2-7 AC1). Used to log in the
+   * first-run admin before OIDC is configured AND as a fallback during
+   * an OIDC outage. Self-disables once a real OIDC-linked admin sign-in
+   * succeeds (AC2 — `bootstrap.disable` is called inside the OIDC
+   * callback path).
+   *
+   * The endpoint returns a generic "Invalid credentials" 401 on every
+   * failure mode (no org / no creds / wrong username / wrong password /
+   * disabled) so an attacker cannot enumerate which orgs have bootstrap
+   * enabled. The BootstrapCredentialsService keeps timing uniform within
+   * each branch.
+   */
+  @Post('bootstrap-login')
+  @Public()
+  async bootstrapLogin(@Body() dto: BootstrapLoginDto): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    user: { id: string; displayName: string; organizationId: string };
+    role: RoleKey;
+  }> {
+    if (
+      !dto?.organizationSlug ||
+      !dto?.username ||
+      !dto?.password ||
+      typeof dto.organizationSlug !== 'string' ||
+      typeof dto.username !== 'string' ||
+      typeof dto.password !== 'string'
+    ) {
+      throw new BadRequestException('organizationSlug, username, and password are required');
+    }
+    const org = await this.prisma.organization.findUnique({
+      where: { slug: dto.organizationSlug.trim() },
+      select: { id: true },
+    });
+    if (!org) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+    const verify = await this.bootstrap.verify(org.id, dto.username, dto.password);
+    if (!verify) {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+    const userId = await this.bootstrap.findUserId(org.id, dto.username);
+    if (!userId) {
+      // Provision should have created the user; reaching here means an
+      // out-of-band cleanup (orphaned credential row). Surface as a
+      // generic 401 — the operator runbook covers the recovery.
+      this.logger.warn(`Bootstrap credential matched but no user row for org ${org.id}`);
+      throw new UnauthorizedException('Invalid credentials');
+    }
+    return this.issueTokens(org.id, userId, 'ADMIN');
+  }
+
+  /**
+   * OIDC-outage recovery (Story 2-7 AC3). An admin presents a previously-
+   * issued single-use recovery code + their email; the matching code
+   * self-burns and an access/refresh JWT pair is issued. The same generic
+   * "Invalid recovery code" response covers every failure mode.
+   */
+  @Post('recovery-redeem')
+  @Public()
+  async recoveryRedeem(@Body() dto: RecoveryRedeemDto): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    user: { id: string; displayName: string; organizationId: string };
+    role: RoleKey;
+  }> {
+    if (
+      !dto?.organizationSlug ||
+      !dto?.email ||
+      !dto?.recoveryCode ||
+      typeof dto.organizationSlug !== 'string' ||
+      typeof dto.email !== 'string' ||
+      typeof dto.recoveryCode !== 'string'
+    ) {
+      throw new BadRequestException(
+        'organizationSlug, email, and recoveryCode are required',
+      );
+    }
+    const org = await this.prisma.organization.findUnique({
+      where: { slug: dto.organizationSlug.trim() },
+      select: { id: true },
+    });
+    if (!org) {
+      throw new UnauthorizedException('Invalid recovery code');
+    }
+    const user = await withOrgScope(this.prisma, org.id, (tx) =>
+      tx.user.findUnique({
+        where: { organizationId_email: { organizationId: org.id, email: dto.email.trim() } },
+        select: { id: true },
+      }),
+    );
+    if (!user) {
+      // Generic 401 to avoid leaking whether the email is provisioned.
+      throw new UnauthorizedException('Invalid recovery code');
+    }
+    const role = await this.resolveHighestRole(user.id, org.id);
+    if (role !== 'ADMIN') {
+      // AC3: recovery codes are bound to admins only. A non-admin user
+      // can never redeem a code regardless of which code they present.
+      throw new UnauthorizedException('Invalid recovery code');
+    }
+    const ok = await this.recovery.redeem(org.id, dto.recoveryCode, user.id);
+    if (!ok) {
+      throw new UnauthorizedException('Invalid recovery code');
+    }
+    return this.issueTokens(org.id, user.id, 'ADMIN');
+  }
+
+  /** Mint access+refresh tokens for an authenticated (orgId, userId, role)
+   *  triple. Shared by the OIDC callback, bootstrap-login, and
+   *  recovery-redeem paths so the JWT shape stays uniform. */
+  private async issueTokens(
+    organizationId: string,
+    userId: string,
+    role: RoleKey,
+  ): Promise<{
+    accessToken: string;
+    refreshToken: string;
+    user: { id: string; displayName: string; organizationId: string };
+    role: RoleKey;
+  }> {
+    const user = await withOrgScope(this.prisma, organizationId, (tx) =>
+      tx.user.findUnique({
+        where: { id: userId },
+        select: { id: true, displayName: true, organizationId: true },
+      }),
+    );
+    if (!user || user.organizationId !== organizationId) {
+      throw new UnauthorizedException('Unknown user/org pair');
+    }
+    const jti = randomUUID();
+    const accessTtl = this.config.get('JWT_ACCESS_TTL_SECONDS');
+    await this.sessions.register({
+      organizationId,
+      userId,
+      jti,
+      ttlSeconds: accessTtl,
+    });
+    const [accessToken, refreshToken] = await Promise.all([
+      this.jwt.signAccess({ sub: userId, org: organizationId, role, name: user.displayName, jti }),
+      this.jwt.signRefresh({ sub: userId, org: organizationId, jti }),
+    ]);
+    return {
+      accessToken,
+      refreshToken,
+      user: { id: user.id, displayName: user.displayName, organizationId: user.organizationId },
+      role,
+    };
   }
 
   /** Pick the highest-precedence active role for (user, org). Computed in

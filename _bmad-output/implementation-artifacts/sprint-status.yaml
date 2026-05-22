@@ -16,14 +16,14 @@ development_status:
   1-7-observability-baseline-pino-logs-prometheus-metrics-opentelemetry-sentry: done
   1-8-health-probes-and-worker-heartbeat: done
   1-9-secrets-management-wiring: done
-  epic-2: backlog
+  epic-2: done
   2-1-identity-schema-users-organizations-role-assignments: done
   2-2-oidc-sso-login-via-openid-client-and-nextauth-session: done
   2-3-redis-backed-server-side-session-store-with-forced-logout: done
   2-4-layer-1-authguard-roles-decorator-cors-lock-down: done
   2-5-layer-2-actorcontext-propagation-and-self-approval-guard-primitive: done
   2-6-layer-3-postgres-row-level-security-policies-with-per-request-org-scoping: done
-  2-7-bootstrap-admin-fallback-credentials-and-oidc-outage-recovery-codes: backlog
+  2-7-bootstrap-admin-fallback-credentials-and-oidc-outage-recovery-codes: done
   epic-3: backlog
   3-1-audit-events-table-monthly-partitioning-and-append-only-db-enforcement: done
   3-2-outbox-events-table-and-post-commit-listen-notify-trigger: done
