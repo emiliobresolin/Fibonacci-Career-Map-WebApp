@@ -1,5 +1,7 @@
 import { Module, type DynamicModule } from '@nestjs/common';
 
+import { AuthModule } from '../auth/auth.module.js';
+import { SessionsModule } from '../sessions/sessions.module.js';
 import { RealtimeGateway } from './realtime.gateway.js';
 
 /**
@@ -18,6 +20,10 @@ export class RealtimeModule {
   static register(opts: { mode: 'api' | 'worker' }): DynamicModule {
     return {
       module: RealtimeModule,
+      // Story 5-2 imports JwtService (AuthModule) + SessionStoreService
+      // (SessionsModule) so the handshake auth can run the same JWT
+      // + session-active checks the HTTP guard runs.
+      imports: opts.mode === 'api' ? [AuthModule, SessionsModule] : [],
       providers: opts.mode === 'api' ? [RealtimeGateway] : [],
       exports: opts.mode === 'api' ? [RealtimeGateway] : [],
     };

@@ -39,8 +39,8 @@ development_status:
   4-5-internal-dlq-admin-tool-and-depth-alerting: done
   4-6-recalculation-status-primitives-exposed-via-domain-contracts: done
   epic-5: backlog
-  5-1-socket-io-server-and-redis-adapter: backlog
-  5-2-websocket-handshake-authentication-using-the-same-session-jwt: backlog
+  5-1-socket-io-server-and-redis-adapter: done
+  5-2-websocket-handshake-authentication-using-the-same-session-jwt: done
   5-3-room-taxonomy-and-room-join-authorization: backlog
   5-4-outbound-event-filter-and-event-type-contract: backlog
   5-5-web-client-socket-io-hook-with-tanstack-query-cache-invalidation-and-polling-fallback: backlog
