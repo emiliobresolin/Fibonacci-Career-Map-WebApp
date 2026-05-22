@@ -15,6 +15,7 @@ import { Logger } from 'nestjs-pino';
 import { AppModule } from './app.module.js';
 import { parseOrigins, validateEnv } from './common/env.config.js';
 import { startWorkerHeartbeat } from './observability/worker-heartbeat.js';
+import { RedisIoAdapter } from './realtime/redis-io.adapter.js';
 
 async function bootstrap(): Promise<void> {
   // Single source of truth for env validation. Same Zod schema is also wired into
@@ -60,6 +61,21 @@ async function bootstrap(): Promise<void> {
       credentials: true,
       methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     });
+
+    // Story 5-1: Socket.IO server with Redis adapter so multi-replica
+    // emits fanout across the cluster. When REDIS_URL is unset (scaffold
+    // / non-prod boot path), the adapter stays single-replica — same
+    // policy as the BullMQ / SessionStore connections.
+    const redisUrl = env.REDIS_URL;
+    if (redisUrl) {
+      const ioAdapter = new RedisIoAdapter(httpApp);
+      await ioAdapter.connectToRedis(redisUrl);
+      httpApp.useWebSocketAdapter(ioAdapter);
+    } else {
+      httpApp.get(Logger).warn(
+        'REDIS_URL not set — Socket.IO running single-replica. Production env-validation forbids this path.',
+      );
+    }
 
     await httpApp.listen(env.PORT);
     httpApp.get(Logger).log(

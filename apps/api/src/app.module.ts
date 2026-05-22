@@ -9,6 +9,7 @@ import { ObservabilityModule } from './observability/observability.module.js';
 import { OutboxModule } from './outbox/outbox.module.js';
 import { PartitionsModule } from './partitions/partitions.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
+import { RealtimeModule } from './realtime/realtime.module.js';
 
 export type ApiMode = 'api' | 'worker';
 
@@ -37,6 +38,7 @@ export class AppModule {
         OutboxModule.register({ mode: opts.mode }),
         PartitionsModule.register({ mode: opts.mode }),
         AuditModule,
+        RealtimeModule.register({ mode: opts.mode }),
         HealthModule,
       ],
     };
