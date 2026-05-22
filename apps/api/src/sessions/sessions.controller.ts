@@ -14,6 +14,7 @@ import type { Request } from 'express';
 import { Roles } from '../auth/roles.decorator.js';
 import type { RequestUser } from '../auth/auth.types.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { withOrgScope } from '../prisma/rls.helpers.js';
 import { SessionStoreService } from './session-store.service.js';
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -56,10 +57,16 @@ export class SessionsController {
     // Cross-org guard: confirm the target user belongs to the actor's
     // organization. Without this, a compromised admin token from org A
     // could forcibly log out users in org B.
-    const target = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, organizationId: true },
-    });
+    //
+    // Wrapped in withOrgScope (Story 2-6): RLS on `users` filters to the
+    // actor's org, so a cross-org user_id never returns a row regardless
+    // of whether the application code below remembers the check.
+    const target = await withOrgScope(this.prisma, actor.organization_id, (tx) =>
+      tx.user.findUnique({
+        where: { id: userId },
+        select: { id: true, organizationId: true },
+      }),
+    );
     if (!target || target.organizationId !== actor.organization_id) {
       // 404-shape to avoid leaking org membership.
       throw new BadRequestException('Unknown user');

@@ -14,6 +14,7 @@ import { Prisma } from '@prisma/client';
 
 import type { Env } from '../common/env.config.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { withOrgScope } from '../prisma/rls.helpers.js';
 import { SessionStoreService } from '../sessions/session-store.service.js';
 import { JwtService } from './jwt.service.js';
 import { OidcStateStore } from './oidc-state.store.js';
@@ -140,32 +141,45 @@ export class AuthController {
     // it and look up the survivor; the data is idempotent so a re-read is
     // safe. The cross-org-identity story (deferred-work F6 from 2-1) will
     // pivot to externalSub when it lands.
+    //
+    // Wrapped in `withOrgScope` (Story 2-6) so the RLS policy on `users`
+    // permits the WITH CHECK on insert + the read-back on findUnique.
+    // The P2002 retry runs in a SECOND `withOrgScope` invocation, NOT
+    // inside the same transaction: Postgres aborts the transaction on a
+    // constraint violation, so any follow-up query within the same
+    // `$transaction` would fail with "current transaction is aborted".
+    // Two transactions cost an extra round-trip on the rare concurrent-
+    // first-login race; the common path is a single transaction.
     let user;
     try {
-      user = await this.prisma.user.upsert({
-        where: {
-          organizationId_email: {
-            organizationId: result.organizationId,
-            email: result.email,
-          },
-        },
-        update: { displayName: result.displayName },
-        create: {
-          organizationId: result.organizationId,
-          email: result.email,
-          displayName: result.displayName,
-        },
-      });
-    } catch (err) {
-      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-        const existing = await this.prisma.user.findUnique({
+      user = await withOrgScope(this.prisma, result.organizationId, (tx) =>
+        tx.user.upsert({
           where: {
             organizationId_email: {
               organizationId: result.organizationId,
               email: result.email,
             },
           },
-        });
+          update: { displayName: result.displayName },
+          create: {
+            organizationId: result.organizationId,
+            email: result.email,
+            displayName: result.displayName,
+          },
+        }),
+      );
+    } catch (err) {
+      if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+        const existing = await withOrgScope(this.prisma, result.organizationId, (tx) =>
+          tx.user.findUnique({
+            where: {
+              organizationId_email: {
+                organizationId: result.organizationId,
+                email: result.email,
+              },
+            },
+          }),
+        );
         if (!existing) throw err;
         user = existing;
       } else {
@@ -263,10 +277,18 @@ export class AuthController {
     // next full OIDC callback re-upserts the row (≤ refresh-token TTL
     // = 24h by default). Acceptable for MVP — SCIM sync (deferred-work)
     // closes that gap.
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
-      select: { id: true, organizationId: true, displayName: true },
-    });
+    //
+    // RLS scope (Story 2-6): the policy on `users` requires
+    // `app.current_org_id` to match the row's organization_id. The refresh
+    // JWT carries the org claim, which we use here as the scope — a
+    // forged token attempting cross-org pivot trips this BEFORE the
+    // cross-org check below (the row would be RLS-filtered to invisible).
+    const user = await withOrgScope(this.prisma, payload.org, (tx) =>
+      tx.user.findUnique({
+        where: { id: payload.sub },
+        select: { id: true, organizationId: true, displayName: true },
+      }),
+    );
     if (!user || user.organizationId !== payload.org) {
       throw new UnauthorizedException('Refresh token does not match a known user/org pair');
     }
@@ -306,12 +328,17 @@ export class AuthController {
    *  JS so we don't depend on Postgres native-enum ordinal ordering matching
    *  our PRD precedence — the Prisma schema's declared enum order does match
    *  today, but encoding the precedence here makes that an explicit invariant
-   *  rather than a coincidence. */
+   *  rather than a coincidence.
+   *
+   *  Wrapped in `withOrgScope` (Story 2-6) so the RLS policy on
+   *  `role_assignments` permits the read. */
   private async resolveHighestRole(userId: string, organizationId: string): Promise<RoleKey | null> {
-    const rows = await this.prisma.roleAssignment.findMany({
-      where: { userId, organizationId, deactivatedAt: null },
-      select: { role: true },
-    });
+    const rows = await withOrgScope(this.prisma, organizationId, (tx) =>
+      tx.roleAssignment.findMany({
+        where: { userId, organizationId, deactivatedAt: null },
+        select: { role: true },
+      }),
+    );
     if (rows.length === 0) return null;
     let best: RoleKey = rows[0]!.role as RoleKey;
     let bestRank = ROLE_PRECEDENCE[best];
