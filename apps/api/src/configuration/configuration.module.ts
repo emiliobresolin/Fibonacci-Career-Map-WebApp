@@ -9,7 +9,9 @@ import { LayersService } from './layers.service.js';
 import { LevelsController } from './levels.controller.js';
 import { LevelsRepository } from './levels.repository.js';
 import { LevelsService } from './levels.service.js';
+import { PromotionRulesController } from './promotion-rules.controller.js';
 import { PromotionRulesRepository } from './promotion-rules.repository.js';
+import { PromotionRulesService } from './promotion-rules.service.js';
 import { RequirementsController } from './requirements.controller.js';
 import { RequirementsRepository } from './requirements.repository.js';
 import { RequirementsService } from './requirements.service.js';
@@ -38,6 +40,7 @@ import { RequirementsService } from './requirements.service.js';
     LevelsController,
     LayersController,
     RequirementsController,
+    PromotionRulesController,
   ],
   providers: [
     CareerTracksRepository,
@@ -49,6 +52,7 @@ import { RequirementsService } from './requirements.service.js';
     RequirementsRepository,
     RequirementsService,
     PromotionRulesRepository,
+    PromotionRulesService,
   ],
   exports: [
     CareerTracksRepository,
@@ -60,6 +64,7 @@ import { RequirementsService } from './requirements.service.js';
     RequirementsRepository,
     RequirementsService,
     PromotionRulesRepository,
+    PromotionRulesService,
   ],
 })
 export class ConfigurationModule {}
