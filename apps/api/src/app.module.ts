@@ -3,6 +3,7 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { CommonModule } from './common/common.module.js';
+import { ConfigurationModule } from './configuration/configuration.module.js';
 import { HealthModule } from './health/health.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
 import { ObservabilityModule } from './observability/observability.module.js';
@@ -40,6 +41,7 @@ export class AppModule {
         PartitionsModule.register({ mode: opts.mode }),
         AuditModule,
         OrganizationsModule,
+        ConfigurationModule,
         RealtimeModule.register({ mode: opts.mode }),
         HealthModule,
       ],

@@ -64,6 +64,16 @@ enum ApprovalWorkflow {
   HR_GATE
 }
 
+/// Evidence type a Requirement expects (PRD §8.4). Determines which
+/// upload / submission surface the employee gets and how the evidence
+/// row stores its payload (text JSONB vs storage object key).
+enum EvidenceType {
+  FILE
+  URL
+  TEXT
+  STRUCTURED
+}
+
 // ─── Models ──────────────────────────────────────────────────────────────────
 
 /// Tenant root. Every tenant-scoped table FKs back here via organization_id.
@@ -93,6 +103,11 @@ model Organization {
   bootstrapCredential      BootstrapCredential?
   recoveryCodes            RecoveryCode[]
   recalcJobs               RecalcJob[]
+  careerTracks             CareerTrack[]
+  levels                   Level[]
+  layers                   Layer[]
+  requirements             Requirement[]
+  promotionRules           PromotionRule[]
 
   @@map("organizations")
 }
@@ -280,6 +295,156 @@ model RecalcJob {
   @@index([organizationId])
   @@index([status])
   @@map("recalc_jobs")
+}
+
+// ─── Configuration domain (Story 6-2) ────────────────────────────────────────
+
+/// Career track within an organization (PRD §8.1, Arch §6.2). Tracks
+/// don't cross org boundaries (the unique on (organization_id, slug)
+/// is the load-bearing constraint here, not the global slug). A track
+/// is the top of the configuration tree: track → levels → layers →
+/// requirements; promotion_rules attach to levels.
+///
+/// `displayOrder` is a per-org integer used to render tracks in a
+/// stable sequence (left-to-right on the map's "spiral arms"). Two
+/// tracks may share the same display_order — the UI breaks ties by
+/// `slug` ascending; we don't enforce uniqueness because the cost of
+/// "you can't reorder mid-flight" is much higher than two visually
+/// adjacent equal-ordered rows.
+model CareerTrack {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  slug            String
+  name            String
+  description     String?
+  displayOrder    Int      @default(0) @map("display_order")
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  levels          Level[]
+
+  @@unique([organizationId, slug])
+  @@index([organizationId])
+  @@map("career_tracks")
+}
+
+/// Level within a career track (PRD §8.2). Score band start/end are
+/// inclusive integer bounds; the non-overlap invariant within a
+/// (career_track_id, active=true) scope is enforced at the DB layer
+/// via a GiST EXCLUDE constraint built in the migration (Prisma can't
+/// model exclusion constraints natively, so the migration hand-rolls
+/// the `CREATE EXTENSION IF NOT EXISTS btree_gist` + `EXCLUDE USING
+/// GIST ... WHERE active = true` clause).
+///
+/// `levelCode` (e.g. "L1", "L2", or org-custom "Staff", "Senior") is
+/// the operator-friendly identifier. Unique within a track.
+///
+/// Bands are inclusive on both ends; the constraint converts them to
+/// `int4range(score_band_start, score_band_end, '[]')` so `[0, 100]`
+/// and `[100, 200]` would overlap (rejected). Operators define
+/// half-open bands as `[0, 99]` and `[100, 200]` if needed.
+model Level {
+  id               String   @id @default(uuid()) @db.Uuid
+  organizationId   String   @map("organization_id") @db.Uuid
+  careerTrackId    String   @map("career_track_id") @db.Uuid
+  levelCode        String   @map("level_code")
+  name             String
+  scoreBandStart   Int      @map("score_band_start")
+  scoreBandEnd     Int      @map("score_band_end")
+  displayOrder     Int      @default(0) @map("display_order")
+  active           Boolean  @default(true)
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization     Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  careerTrack      CareerTrack     @relation(fields: [careerTrackId], references: [id], onDelete: Cascade)
+  layers           Layer[]
+  promotionRule    PromotionRule?
+
+  @@unique([careerTrackId, levelCode])
+  @@index([organizationId])
+  @@index([careerTrackId])
+  @@map("levels")
+}
+
+/// Layer within a level (PRD §8.3). Default seed is Capability /
+/// Delivery / Influence but layer names are fully configurable per
+/// level. Unique within a level by name.
+model Layer {
+  id              String   @id @default(uuid()) @db.Uuid
+  organizationId  String   @map("organization_id") @db.Uuid
+  levelId         String   @map("level_id") @db.Uuid
+  name            String
+  displayOrder    Int      @default(0) @map("display_order")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  level           Level        @relation(fields: [levelId], references: [id], onDelete: Cascade)
+  requirements    Requirement[]
+
+  @@unique([levelId, name])
+  @@index([organizationId])
+  @@index([levelId])
+  @@map("layers")
+}
+
+/// Requirement within a layer (PRD §8.4). `weight` is a positive
+/// integer (Fibonacci default at seed time); `mandatory` gates
+/// Readiness; `expiryMonths` is nullable — null means evidence for
+/// this requirement does not expire.
+model Requirement {
+  id              String       @id @default(uuid()) @db.Uuid
+  organizationId  String       @map("organization_id") @db.Uuid
+  layerId         String       @map("layer_id") @db.Uuid
+  name            String
+  description     String?
+  evidenceType    EvidenceType @map("evidence_type")
+  weight          Int
+  mandatory       Boolean      @default(false)
+  expiryMonths    Int?         @map("expiry_months")
+  active          Boolean      @default(true)
+  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  layer           Layer        @relation(fields: [layerId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([layerId])
+  @@map("requirements")
+}
+
+/// Promotion rule per level (PRD §8.5). Exactly one row per level
+/// (`level_id` unique). Defaults at the schema layer mirror the PRD
+/// defaults so a fresh seed produces working configuration without
+/// the seeder having to know which column gets which default.
+///
+/// `blockerCheck = true` makes the eligibility evaluator (§7.5
+/// condition 4) consult `employee_blockers` for an active row before
+/// flagging the employee Eligible. Per-level override allows orgs to
+/// disable the blocker check for early-career levels where blockers
+/// are extremely rare.
+model PromotionRule {
+  id                       String   @id @default(uuid()) @db.Uuid
+  organizationId           String   @map("organization_id") @db.Uuid
+  levelId                  String   @unique @map("level_id") @db.Uuid
+  minScore                 Int      @map("min_score")
+  minTimeAtLevelMonths     Int?     @map("min_time_at_level_months")
+  mandatoryCompletion      Boolean  @default(true) @map("mandatory_completion")
+  managerRequired          Boolean  @default(true) @map("manager_required")
+  hrRequired               Boolean  @default(false) @map("hr_required")
+  blockerCheck             Boolean  @default(true) @map("blocker_check")
+  createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt                DateTime @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization             Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  level                    Level        @relation(fields: [levelId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("promotion_rules")
 }
 
 /// OIDC-outage recovery codes (Story 2-7, PRD FR-1.2). 10 single-use codes
