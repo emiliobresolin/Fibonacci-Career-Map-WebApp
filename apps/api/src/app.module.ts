@@ -6,6 +6,7 @@ import { CommonModule } from './common/common.module.js';
 import { HealthModule } from './health/health.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
 import { ObservabilityModule } from './observability/observability.module.js';
+import { OrganizationsModule } from './organizations/organizations.module.js';
 import { OutboxModule } from './outbox/outbox.module.js';
 import { PartitionsModule } from './partitions/partitions.module.js';
 import { PrismaModule } from './prisma/prisma.module.js';
@@ -38,6 +39,7 @@ export class AppModule {
         OutboxModule.register({ mode: opts.mode }),
         PartitionsModule.register({ mode: opts.mode }),
         AuditModule,
+        OrganizationsModule,
         RealtimeModule.register({ mode: opts.mode }),
         HealthModule,
       ],

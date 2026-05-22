@@ -116,6 +116,22 @@ const SAMPLES: Record<string, AuditEvent> = {
     before: { targetUserId: UUID_D, revokedSessionCount: 2 },
     after: null,
   }) as AuditEvent,
+  'organization.created': base({
+    // Story 6-1: bootstrap-tooling provisioning event. actorId is null
+    // because the org has no users when the row is created.
+    eventType: 'organization.created',
+    entityType: 'organization',
+    actorId: null,
+    reason: null,
+    before: null,
+    after: {
+      slug: 'acme',
+      name: 'Acme Corp',
+      visibilityDefault: 'OWN_ONLY',
+      approvalWorkflowDefault: 'SINGLE',
+      promotionMode: 'CALIBRATION',
+    },
+  }) as AuditEvent,
 };
 
 test('AUDIT_EVENT_TYPES enumerates exactly the variants of the discriminated union', () => {
@@ -128,7 +144,11 @@ test('AUDIT_EVENT_TYPES enumerates exactly the variants of the discriminated uni
     [...arrayTypes].sort(),
     'AUDIT_EVENT_TYPES drift from AuditEventSchema discriminator',
   );
-  assert.equal(arrayTypes.size, 12, 'PRD §10.1 enumerates 11 event types + session.revoked (Story 2-3)');
+  assert.equal(
+    arrayTypes.size,
+    13,
+    'PRD §10.1 enumerates 11 event types + session.revoked (Story 2-3) + organization.created (Story 6-1)',
+  );
 });
 
 test('every PRD §10.1 event type has a valid sample + round-trips through parseAuditEvent', () => {

@@ -50,6 +50,17 @@ export const envSchema = z
     JWT_ACCESS_TTL_SECONDS: z.coerce.number().int().positive().default(900),
     JWT_REFRESH_TTL_SECONDS: z.coerce.number().int().positive().default(24 * 60 * 60),
 
+    // ─── Internal provisioning (Story 6-1) ──────────────────────────────────────
+    // Shared secret used by bootstrap tooling to authenticate POST /v1/organizations.
+    // The endpoint is opaque to tenant Admins — it's called by the operator-side
+    // provisioning tool, NOT by any end-user JWT. Required in production; in
+    // dev/test the endpoint closed-fails (401) when unset.
+    //
+    // Min 32 chars matches the JWT-secret minimum; both are operator-facing
+    // shared secrets with similar threat properties (theft → unauthorized
+    // tenant creation).
+    INTERNAL_PROVISIONING_TOKEN: z.string().min(32).optional(),
+
     // ─── CORS lock-down (Story 2-4) ─────────────────────────────────────────────
     // Comma-separated allow-list of web origins permitted to call the API.
     // Empty/unset means CORS is effectively closed (no cross-origin requests
@@ -94,6 +105,14 @@ export const envSchema = z
         code: z.ZodIssueCode.custom,
         path: ['JWT_SIGNING_SECRET'],
         message: 'JWT_SIGNING_SECRET (≥32 chars) is required when NODE_ENV=production',
+      });
+    }
+    if (!val.INTERNAL_PROVISIONING_TOKEN) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['INTERNAL_PROVISIONING_TOKEN'],
+        message:
+          'INTERNAL_PROVISIONING_TOKEN (≥32 chars) is required when NODE_ENV=production (POST /v1/organizations gate)',
       });
     }
     if (!val.CORS_ALLOWED_ORIGINS || parseOrigins(val.CORS_ALLOWED_ORIGINS).length === 0) {

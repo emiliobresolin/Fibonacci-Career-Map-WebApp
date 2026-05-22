@@ -200,6 +200,25 @@ export const ApprovalWorkflowChangedSchema = AuditBaseSchema.extend({
   }),
 });
 
+// organization.created — Story 6-1. Bootstrap-tooling provisioning emits
+// this event when a new org row lands. `actorId` is null (system event —
+// the org has no users yet when this fires), and the variant carries the
+// AC1-mandated default fields so an audit reader can verify them at the
+// moment of provisioning without re-reading the row.
+export const OrganizationCreatedSchema = AuditBaseSchema.extend({
+  eventType: z.literal('organization.created'),
+  entityType: z.literal('organization'),
+  reason: z.string().nullable(),
+  before: z.null(),
+  after: z.object({
+    slug: z.string().min(1),
+    name: z.string().min(1),
+    visibilityDefault: VisibilitySettingSchema,
+    approvalWorkflowDefault: ApprovalWorkflowKindSchema,
+    promotionMode: z.enum(['CALIBRATION', 'ACTIVE']),
+  }),
+});
+
 // session.revoked — Story 2-3. Surfaced in the taxonomy because the
 // outbox relay (Story 3-3) validates every persisted event against this
 // schema, and revocation must be auditable per PRD §10.2 ("every
@@ -233,6 +252,7 @@ export const AuditEventSchema = z.discriminatedUnion('eventType', [
   VisibilityRuleChangedSchema,
   ApprovalWorkflowChangedSchema,
   SessionRevokedSchema,
+  OrganizationCreatedSchema,
 ]);
 
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
@@ -250,6 +270,7 @@ export type RoleAssignmentChanged = z.infer<typeof RoleAssignmentChangedSchema>;
 export type VisibilityRuleChanged = z.infer<typeof VisibilityRuleChangedSchema>;
 export type ApprovalWorkflowChanged = z.infer<typeof ApprovalWorkflowChangedSchema>;
 export type SessionRevoked = z.infer<typeof SessionRevokedSchema>;
+export type OrganizationCreated = z.infer<typeof OrganizationCreatedSchema>;
 
 /** All declared event types — kept in sync with the discriminator union. */
 export const AUDIT_EVENT_TYPES = [
@@ -265,6 +286,7 @@ export const AUDIT_EVENT_TYPES = [
   'visibility_rule.changed',
   'approval_workflow.changed',
   'session.revoked',
+  'organization.created',
 ] as const satisfies readonly AuditEventType[];
 
 /**
