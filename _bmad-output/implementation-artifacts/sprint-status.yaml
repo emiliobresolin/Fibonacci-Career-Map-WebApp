@@ -41,8 +41,8 @@ development_status:
   epic-5: backlog
   5-1-socket-io-server-and-redis-adapter: done
   5-2-websocket-handshake-authentication-using-the-same-session-jwt: done
-  5-3-room-taxonomy-and-room-join-authorization: backlog
-  5-4-outbound-event-filter-and-event-type-contract: backlog
+  5-3-room-taxonomy-and-room-join-authorization: done
+  5-4-outbound-event-filter-and-event-type-contract: done
   5-5-web-client-socket-io-hook-with-tanstack-query-cache-invalidation-and-polling-fallback: backlog
   epic-6: backlog
   6-1-organization-provisioning-api: backlog
