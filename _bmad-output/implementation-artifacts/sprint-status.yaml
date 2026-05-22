@@ -45,7 +45,7 @@ development_status:
   5-4-outbound-event-filter-and-event-type-contract: done
   5-5-web-client-socket-io-hook-with-tanstack-query-cache-invalidation-and-polling-fallback: done
   epic-5: done
-  epic-6: in-progress
+  epic-6: done
   6-1-organization-provisioning-api: done
   6-2-configuration-tables-tracks-levels-layers-requirements-promotion-rules: done
   6-2a-employees-and-employee-assignments-tables: done
@@ -53,7 +53,7 @@ development_status:
   6-3-seedingservice-with-cdf-defaults: done
   6-4-first-admin-bootstrap-flow: done
   6-5-employee-roster-csv-bulk-import: done
-  6-6-integration-test-seed-assign-fetch-map-employees-happy-path: backlog
+  6-6-integration-test-seed-assign-fetch-map-employees-happy-path: done
   epic-7: backlog
   7-1-career-tracks-crud-api-audit: backlog
   7-2-levels-crud-with-non-overlapping-band-enforcement: backlog
