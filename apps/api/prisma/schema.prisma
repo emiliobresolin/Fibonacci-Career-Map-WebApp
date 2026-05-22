@@ -108,6 +108,8 @@ model Organization {
   layers                   Layer[]
   requirements             Requirement[]
   promotionRules           PromotionRule[]
+  employees                Employee[]
+  employeeAssignments      EmployeeAssignment[]
 
   @@map("organizations")
 }
@@ -127,6 +129,7 @@ model User {
 
   organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   roleAssignments  RoleAssignment[]
+  employees        Employee[]
 
   @@unique([organizationId, email])
   @@index([organizationId])
@@ -324,6 +327,7 @@ model CareerTrack {
 
   organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   levels          Level[]
+  employees       Employee[]
 
   @@unique([organizationId, slug])
   @@index([organizationId])
@@ -362,6 +366,7 @@ model Level {
   careerTrack      CareerTrack     @relation(fields: [careerTrackId], references: [id], onDelete: Cascade)
   layers           Layer[]
   promotionRule    PromotionRule?
+  employees        Employee[]
 
   @@unique([careerTrackId, levelCode])
   @@index([organizationId])
@@ -465,4 +470,93 @@ model RecoveryCode {
 
   @@index([organizationId])
   @@map("recovery_codes")
+}
+
+// ─── Identity domain (Story 6-2a) ────────────────────────────────────────────
+
+/// Employee profile (Story 6-2a, Arch §6.2, PRD §4.2 / §6.1).
+///
+/// One row per (organization_id, user_id) pair — an FCM user can be
+/// onboarded as an employee inside their home org. Track and level
+/// are nullable because new hires may exist in the system before
+/// they're assigned a track (e.g. roster CSV import lands users first,
+/// then an admin pass assigns tracks).
+///
+/// FK CASCADE to organizations: deleting a tenant wipes its employees.
+/// FK CASCADE to users: deleting the underlying user row also wipes the
+/// employee row (which already cascades into employee_assignments).
+/// FK RESTRICT to career_tracks / levels: a configuration delete is
+/// blocked until every employee on that track/level is reassigned —
+/// this is intentional defense-in-depth against operator-error config
+/// changes during a live rollout.
+///
+/// `deactivatedAt` is a soft-deactivation marker: a deactivated
+/// employee row remains for historical FK targets (evidence,
+/// promotion_records, score_snapshots) but is excluded from active
+/// employee surfaces by the repository's default queries.
+model Employee {
+  id              String    @id @default(uuid()) @db.Uuid
+  organizationId  String    @map("organization_id") @db.Uuid
+  userId          String    @map("user_id") @db.Uuid
+  careerTrackId   String?   @map("career_track_id") @db.Uuid
+  levelId         String?   @map("level_id") @db.Uuid
+  assignedAt      DateTime? @map("assigned_at") @db.Timestamptz
+  deactivatedAt   DateTime? @map("deactivated_at") @db.Timestamptz
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  careerTrack     CareerTrack? @relation(fields: [careerTrackId], references: [id], onDelete: Restrict)
+  level           Level?       @relation(fields: [levelId], references: [id], onDelete: Restrict)
+  assignments     EmployeeAssignment[] @relation("AssignmentEmployee")
+  managedAssignments EmployeeAssignment[] @relation("AssignmentManager")
+
+  @@unique([organizationId, userId])
+  @@index([organizationId])
+  @@index([careerTrackId])
+  @@index([levelId])
+  @@index([userId])
+  @@map("employees")
+}
+
+/// Employee assignment within an organization (Arch §6.2, PRD §4.2).
+///
+/// Carries the manager hierarchy via `managerEmployeeId` (self-reference
+/// to `employees`). Self-management is forbidden — enforced by a
+/// BEFORE INSERT/UPDATE trigger (AC3) so a misconfigured admin UI
+/// can't accidentally make someone their own manager.
+///
+/// Active rows are uniquely identified by `(employee_id,
+/// organization_id, role)` — the partial unique index in the
+/// migration scopes the constraint to `deactivated_at IS NULL`, so a
+/// re-grant of a previously-deactivated role is a fresh INSERT (same
+/// soft-delete model as `role_assignments`).
+///
+/// Note: this is DISTINCT from `role_assignments` (Story 2-1) — that
+/// table is per-user for RBAC. `employee_assignments` is per-employee
+/// for org-structure (manager hierarchy, role within team).
+model EmployeeAssignment {
+  id                    String    @id @default(uuid()) @db.Uuid
+  employeeId            String    @map("employee_id") @db.Uuid
+  organizationId        String    @map("organization_id") @db.Uuid
+  role                  Role
+  managerEmployeeId     String?   @map("manager_employee_id") @db.Uuid
+  assignedAt            DateTime  @default(now()) @map("assigned_at") @db.Timestamptz
+  deactivatedAt         DateTime? @map("deactivated_at") @db.Timestamptz
+  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+
+  employee              Employee     @relation("AssignmentEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  manager               Employee?    @relation("AssignmentManager", fields: [managerEmployeeId], references: [id], onDelete: SetNull)
+
+  // The @@unique here is what Prisma uses to type composite-key accessors.
+  // The DB-level constraint is a PARTIAL unique index on (employee_id,
+  // organization_id, role) WHERE deactivated_at IS NULL — see migration.sql.
+  @@unique([employeeId, organizationId, role])
+  @@index([organizationId])
+  @@index([employeeId])
+  @@index([managerEmployeeId])
+  @@map("employee_assignments")
 }

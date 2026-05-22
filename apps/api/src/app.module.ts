@@ -5,6 +5,7 @@ import { AuthModule } from './auth/auth.module.js';
 import { CommonModule } from './common/common.module.js';
 import { ConfigurationModule } from './configuration/configuration.module.js';
 import { HealthModule } from './health/health.module.js';
+import { IdentityModule } from './identity/identity.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
 import { ObservabilityModule } from './observability/observability.module.js';
 import { OrganizationsModule } from './organizations/organizations.module.js';
@@ -42,6 +43,7 @@ export class AppModule {
         AuditModule,
         OrganizationsModule,
         ConfigurationModule,
+        IdentityModule,
         RealtimeModule.register({ mode: opts.mode }),
         HealthModule,
       ],
