@@ -192,7 +192,13 @@ export class AuthController {
     });
 
     const [accessToken, refreshToken] = await Promise.all([
-      this.jwt.signAccess({ sub: user.id, org: user.organizationId, role, jti }),
+      this.jwt.signAccess({
+        sub: user.id,
+        org: user.organizationId,
+        role,
+        name: user.displayName,
+        jti,
+      }),
       this.jwt.signRefresh({ sub: user.id, org: user.organizationId, jti }),
     ]);
 
@@ -248,9 +254,18 @@ export class AuthController {
     // the refresh token. The JWT signature already binds (sub, org), but a
     // compromised signing key (or a future RS256 misconfiguration) would
     // permit a forged token; a DB cross-check refuses cross-org pivots.
+    // We pull displayName too so the rotated access token can carry the
+    // OIDC `name` claim required by ActorContext (Story 2-5).
+    //
+    // Staleness window: this reads from the FCM `user` row, not the IdP.
+    // If a user updates their displayName upstream (e.g. in Okta) between
+    // sessions, FCM continues to render their previous name until the
+    // next full OIDC callback re-upserts the row (≤ refresh-token TTL
+    // = 24h by default). Acceptable for MVP — SCIM sync (deferred-work)
+    // closes that gap.
     const user = await this.prisma.user.findUnique({
       where: { id: payload.sub },
-      select: { id: true, organizationId: true },
+      select: { id: true, organizationId: true, displayName: true },
     });
     if (!user || user.organizationId !== payload.org) {
       throw new UnauthorizedException('Refresh token does not match a known user/org pair');
@@ -275,7 +290,13 @@ export class AuthController {
     });
 
     const [accessToken, refreshToken] = await Promise.all([
-      this.jwt.signAccess({ sub: payload.sub, org: payload.org, role, jti }),
+      this.jwt.signAccess({
+        sub: payload.sub,
+        org: payload.org,
+        role,
+        name: user.displayName,
+        jti,
+      }),
       this.jwt.signRefresh({ sub: payload.sub, org: payload.org, jti }),
     ]);
     return { accessToken, refreshToken };

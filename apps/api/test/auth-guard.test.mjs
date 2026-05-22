@@ -136,19 +136,32 @@ test('AC4: returns true + populates req.user when token + role match', async () 
   const guard = build({
     reflector: makeReflector({ roles: ['MANAGER', 'ADMIN'] }),
     jwt: makeJwt({
-      verify: async () => ({ sub: 'u1', org: 'o1', role: 'ADMIN', jti: 'j1' }),
+      verify: async () => ({ sub: 'u1', org: 'o1', role: 'ADMIN', name: 'Alice Admin', jti: 'j1' }),
     }),
   });
   const ctx = makeContext({ authorization: 'Bearer abc' });
   const result = await guard.canActivate(ctx);
   assert.equal(result, true);
-  // AC1: request.user populated with the documented shape
+  // AC1 + Story 2-5: request.user populated with the documented shape
+  // including display_name from the OIDC `name` claim.
   assert.deepEqual(ctx._request.user, {
     user_id: 'u1',
     organization_id: 'o1',
     role: 'ADMIN',
+    display_name: 'Alice Admin',
     jti: 'j1',
   });
+});
+
+test('Story 2-5: tokens without the `name` claim get an empty display_name', async () => {
+  const guard = build({
+    jwt: makeJwt({
+      verify: async () => ({ sub: 'u1', org: 'o1', role: 'EMPLOYEE' }), // no `name`
+    }),
+  });
+  const ctx = makeContext({ authorization: 'Bearer abc' });
+  assert.equal(await guard.canActivate(ctx), true);
+  assert.equal(ctx._request.user.display_name, '');
 });
 
 test('AC2: no @Roles annotation → any authenticated role passes', async () => {

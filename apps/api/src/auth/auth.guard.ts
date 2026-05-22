@@ -119,6 +119,12 @@ export class JwtAuthGuard implements CanActivate {
       user_id: payload.sub,
       organization_id: payload.org,
       role: payload.role,
+      // OIDC `name` claim minted at login (Story 2-5). Empty-string fallback
+      // for legacy tokens that pre-date the claim — better than `undefined`
+      // since downstream consumers (ActorContext / audit attribution) are
+      // statically typed `string`. The next refresh re-mints with the
+      // populated name.
+      display_name: typeof payload.name === 'string' ? payload.name : '',
       ...(payload.jti ? { jti: payload.jti } : {}),
     };
     // Attach to the request so controllers + the future ActorContext

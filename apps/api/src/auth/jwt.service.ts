@@ -17,6 +17,12 @@ export type AccessTokenPayload = {
   sub: string; // user.id
   org: string; // organization.id
   role: 'EMPLOYEE' | 'MANAGER' | 'ADMIN';
+  /** OIDC standard `name` claim. Carried into the JWT so the ActorContext
+   *  primitive (Story 2-5) can attribute actions without a DB round-trip
+   *  on every request. Kept optional during the migration: tokens minted
+   *  before Story 2-5 don't have it, and the auth guard tolerates an
+   *  empty string. New tokens always populate. */
+  name?: string;
   /** Session anchor (Story 2-3). The Redis session store keys on
    *  `session:<org>:<sub>:<jti>`; the auth guard checks Redis on
    *  every request and rejects when the key is gone (forced logout).
@@ -76,6 +82,7 @@ export class JwtService implements OnModuleInit {
     const builder = new SignJWT({
       org: payload.org,
       role: payload.role,
+      ...(payload.name !== undefined ? { name: payload.name } : {}),
       ...(payload.jti !== undefined ? { jti: payload.jti } : {}),
     })
       .setProtectedHeader({ alg: JwtService.ALG })
@@ -120,10 +127,19 @@ export class JwtService implements OnModuleInit {
       if (!(ROLES as readonly string[]).includes(role)) {
         throw new UnauthorizedException('Malformed access token');
       }
+      // Sanitize the `name` claim — bound length and strip ASCII control
+      // characters so a malicious or compromised IdP cannot inject a
+      // multi-MB string or NUL bytes that would propagate verbatim into
+      // audit rows / UI rendering. Anything that doesn't fit becomes
+      // an empty string (the AuthGuard already tolerates that for legacy
+      // tokens).
+      const rawName = payload['name'];
+      const name = typeof rawName === 'string' ? sanitizeName(rawName) : undefined;
       return {
         sub: payload.sub,
         org: payload['org'],
         role: role as Role,
+        ...(name !== undefined ? { name } : {}),
         ...(typeof payload.jti === 'string' ? { jti: payload.jti } : {}),
       };
     } catch {
@@ -149,4 +165,20 @@ export class JwtService implements OnModuleInit {
       throw new UnauthorizedException('Invalid or expired refresh token');
     }
   }
+}
+
+/**
+ * Sanitize the OIDC `name` claim before it lands on `req.user.display_name`.
+ * Strips ASCII control characters (0x00–0x1F and 0x7F) and caps length at
+ * NAME_MAX_CHARS. Defends against a compromised IdP shipping a megabyte-long
+ * display name or smuggling NUL bytes through to audit rows / UI rendering.
+ * Returns `''` when nothing usable remains so the AuthGuard's empty-string
+ * fallback handles it.
+ */
+const NAME_MAX_CHARS = 256;
+function sanitizeName(raw: string): string {
+  // eslint-disable-next-line no-control-regex
+  const stripped = raw.replace(/[\x00-\x1F\x7F]/g, '').trim();
+  if (stripped.length === 0) return '';
+  return stripped.length > NAME_MAX_CHARS ? stripped.slice(0, NAME_MAX_CHARS) : stripped;
 }
