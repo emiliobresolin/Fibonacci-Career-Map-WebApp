@@ -1,8 +1,10 @@
 import { Inject, Logger } from '@nestjs/common';
 import {
   ConnectedSocket,
+  MessageBody,
   OnGatewayConnection,
   OnGatewayDisconnect,
+  SubscribeMessage,
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
@@ -16,6 +18,7 @@ import { JwtService } from '../auth/jwt.service.js';
 import type { Env } from '../common/env.config.js';
 import { parseOrigins } from '../common/env.config.js';
 import { SessionStoreService } from '../sessions/session-store.service.js';
+import { authorizeRoomJoin } from './room-authz.js';
 
 /**
  * FCM realtime gateway (Story 5-1 + 5-2).
@@ -153,6 +156,64 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       },
       'socket connected',
     );
+  }
+
+  /**
+   * Story 5-3: room-join handler. Clients send `{ event: 'join', data: '<room>' }`;
+   * the server authorizes via `authorizeRoomJoin` and either calls
+   * `socket.join(room)` or replies with a structured reject log.
+   *
+   * The employee-room visibility probe (direct-manager check) is
+   * wired in when employee_assignments lands (Story 6-2a). For now,
+   * the probe is undefined and the gateway falls back to the
+   * static rule (self / ADMIN only) for `employee:` rooms.
+   */
+  @SubscribeMessage('join')
+  async onJoin(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() room: string,
+  ): Promise<{ ok: true; room: string } | { ok: false; reason: string }> {
+    const actor = (client.data as { actor?: ActorContext }).actor;
+    const correlationId = (client.data as { correlation_id?: string }).correlation_id;
+    if (!actor) {
+      // Pre-auth socket trying to join a room. Should not happen because
+      // unauth sockets are disconnected at handshake; defensive.
+      this.logger.warn(
+        { correlation_id: correlationId, op: 'ws_join_reject', reason: 'unauthenticated' },
+        'join rejected: socket has no actor',
+      );
+      return { ok: false, reason: 'unauthenticated' };
+    }
+    const verdict = await authorizeRoomJoin(actor, room);
+    if (!verdict.allowed) {
+      // AC5: structured log on reject (NOT an audit event — room-join
+      // attempts are too noisy for the audit pipeline; the realtime
+      // logs cover this surface).
+      this.logger.warn(
+        {
+          correlation_id: correlationId,
+          op: 'ws_join_reject',
+          reason: verdict.reason,
+          user_id: actor.user_id,
+          organization_id: actor.organization_id,
+          room,
+        },
+        'join rejected',
+      );
+      return { ok: false, reason: verdict.reason };
+    }
+    await client.join(room);
+    this.logger.log(
+      {
+        correlation_id: correlationId,
+        op: 'ws_join',
+        user_id: actor.user_id,
+        organization_id: actor.organization_id,
+        room,
+      },
+      'joined room',
+    );
+    return { ok: true, room };
   }
 
   handleDisconnect(@ConnectedSocket() client: Socket): void {
