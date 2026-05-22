@@ -1,9 +1,12 @@
 import { BullModule } from '@nestjs/bullmq';
 import { Module, type DynamicModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
+import { DiscoveryModule } from '@nestjs/core';
 
 import type { Env } from '../common/env.config.js';
 import { ObservabilityModule } from '../observability/observability.module.js';
+import { CronRegistrarService } from './cron-registrar.service.js';
+import { HeartbeatCron } from './heartbeat-cron.js';
 import { QueueMetricsService } from './queue-metrics.service.js';
 import { RecalcJobService } from './recalc-job.service.js';
 import { SmokeConsumer } from './smoke.consumer.js';
@@ -87,6 +90,10 @@ export class JobsModule {
         // ObservabilityModule for MetricsService (QueueMetricsService
         // registers gauges + histograms against the shared registry).
         ObservabilityModule,
+        // DiscoveryModule provides DiscoveryService + MetadataScanner
+        // that CronRegistrarService uses to walk the provider graph
+        // and find @Cron-decorated methods (Story 4-4).
+        DiscoveryModule,
         BullModule.forRootAsync({
           imports: [ConfigModule],
           useFactory: (config: ConfigService<Env, true>) => {
@@ -124,7 +131,19 @@ export class JobsModule {
       providers: [
         QueueMetricsService,
         RecalcJobService,
-        ...(opts.mode === 'worker' ? [SmokeConsumer, ...stubConsumers] : []),
+        ...(opts.mode === 'worker'
+          ? [
+              SmokeConsumer,
+              ...stubConsumers,
+              // Story 4-4: cron infrastructure runs in worker mode only.
+              // api-mode never registers cron schedules — workers own
+              // that responsibility, and BullMQ would dedup duplicates
+              // anyway, but keeping them out of api-mode avoids the
+              // operational confusion.
+              CronRegistrarService,
+              HeartbeatCron,
+            ]
+          : []),
       ],
       exports: [...queueRegistrations, QueueMetricsService, RecalcJobService],
     };
