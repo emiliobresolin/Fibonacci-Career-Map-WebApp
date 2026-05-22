@@ -38,12 +38,13 @@ development_status:
   4-4-cron-scheduler-pattern: done
   4-5-internal-dlq-admin-tool-and-depth-alerting: done
   4-6-recalculation-status-primitives-exposed-via-domain-contracts: done
-  epic-5: backlog
+  epic-5: done
   5-1-socket-io-server-and-redis-adapter: done
   5-2-websocket-handshake-authentication-using-the-same-session-jwt: done
   5-3-room-taxonomy-and-room-join-authorization: done
   5-4-outbound-event-filter-and-event-type-contract: done
-  5-5-web-client-socket-io-hook-with-tanstack-query-cache-invalidation-and-polling-fallback: backlog
+  5-5-web-client-socket-io-hook-with-tanstack-query-cache-invalidation-and-polling-fallback: done
+  epic-5: done
   epic-6: backlog
   6-1-organization-provisioning-api: backlog
   6-2-configuration-tables-tracks-levels-layers-requirements-promotion-rules: backlog
