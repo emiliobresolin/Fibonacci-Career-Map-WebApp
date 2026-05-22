@@ -74,6 +74,17 @@ enum EvidenceType {
   STRUCTURED
 }
 
+/// Active-blocker kind (PRD §8.5 condition 4). Used by the eligibility
+/// evaluator to gate Promotion Eligibility: a row in `employee_blockers`
+/// with `resolved_at IS NULL` makes the employee NOT_ELIGIBLE regardless
+/// of score/readiness. `OTHER` is the catch-all for org-specific holds.
+enum BlockerKind {
+  PIP
+  PERFORMANCE_CONCERN
+  HR_HOLD
+  OTHER
+}
+
 // ─── Models ──────────────────────────────────────────────────────────────────
 
 /// Tenant root. Every tenant-scoped table FKs back here via organization_id.
@@ -110,6 +121,7 @@ model Organization {
   promotionRules           PromotionRule[]
   employees                Employee[]
   employeeAssignments      EmployeeAssignment[]
+  employeeBlockers         EmployeeBlocker[]
 
   @@map("organizations")
 }
@@ -511,6 +523,7 @@ model Employee {
   level           Level?       @relation(fields: [levelId], references: [id], onDelete: Restrict)
   assignments     EmployeeAssignment[] @relation("AssignmentEmployee")
   managedAssignments EmployeeAssignment[] @relation("AssignmentManager")
+  blockers        EmployeeBlocker[]
 
   @@unique([organizationId, userId])
   @@index([organizationId])
@@ -559,4 +572,48 @@ model EmployeeAssignment {
   @@index([employeeId])
   @@index([managerEmployeeId])
   @@map("employee_assignments")
+}
+
+/// Active-blocker registry (Story 6-2b, Arch §6.2, PRD §7.5 condition 4,
+/// PRD §8.5). The eligibility evaluator (Epic 9) reads
+/// `EXISTS(SELECT 1 FROM employee_blockers WHERE employee_id = $1
+/// AND resolved_at IS NULL)` as the canonical blocker check — this is
+/// THE source of truth for "is this employee currently blocked from
+/// promotion?".
+///
+/// Per PRD §8.5 a blocker is "active" while `resolved_at IS NULL`.
+/// The PARTIAL unique index on `(employee_id, kind) WHERE
+/// resolved_at IS NULL` enforces at-most-one active blocker per
+/// (employee, kind) — a second PIP for the same employee while the
+/// first is open is an admin-side bug; resolving the first lets a
+/// new one be opened (same shape as employee_assignments and
+/// role_assignments).
+///
+/// `reason` is required and at least 20 chars (DB-level CHECK) so the
+/// audit trail can never lose the why. `openedBy` is the Admin/HR
+/// user who opened the blocker; `resolvedBy` is the user who closed
+/// it. Both reference `users` (NOT employees) because the actor is
+/// an authenticated user, which may or may not also be an employee.
+model EmployeeBlocker {
+  id              String      @id @default(uuid()) @db.Uuid
+  organizationId  String      @map("organization_id") @db.Uuid
+  employeeId      String      @map("employee_id") @db.Uuid
+  kind            BlockerKind
+  reason          String
+  openedAt        DateTime    @default(now()) @map("opened_at") @db.Timestamptz
+  resolvedAt      DateTime?   @map("resolved_at") @db.Timestamptz
+  openedBy        String      @map("opened_by") @db.Uuid
+  resolvedBy      String?     @map("resolved_by") @db.Uuid
+  /// Optional free-text recorded at resolve time. Audited verbatim
+  /// when the blocker is resolved.
+  resolutionNote  String?     @map("resolution_note")
+  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee        Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([employeeId])
+  @@map("employee_blockers")
 }

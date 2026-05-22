@@ -200,6 +200,38 @@ export const ApprovalWorkflowChangedSchema = AuditBaseSchema.extend({
   }),
 });
 
+// blocker.opened / blocker.resolved — Story 6-2b. State changes on
+// employee_blockers are audited per PRD §8.5 ("every state change
+// writes an audit event"). `kind` is the canonical BlockerKind enum
+// mirrored as a string literal here; `entityType: 'employee_blocker'`
+// matches the outbox row's aggregate_type.
+const BlockerKindSchema = z.enum(['PIP', 'PERFORMANCE_CONCERN', 'HR_HOLD', 'OTHER']);
+
+export const BlockerOpenedSchema = AuditBaseSchema.extend({
+  eventType: z.literal('blocker.opened'),
+  entityType: z.literal('employee_blocker'),
+  // Reason carries the same ≥20-char minimum the DB enforces.
+  reason: z.string().min(20),
+  before: z.null(),
+  after: z.object({
+    employeeId: UuidSchema,
+    kind: BlockerKindSchema,
+  }),
+});
+
+export const BlockerResolvedSchema = AuditBaseSchema.extend({
+  eventType: z.literal('blocker.resolved'),
+  entityType: z.literal('employee_blocker'),
+  // Optional resolution note recorded at resolve time. Stored
+  // verbatim in audit_events.reason for traceability.
+  reason: z.string().nullable(),
+  before: z.object({
+    employeeId: UuidSchema,
+    kind: BlockerKindSchema,
+  }),
+  after: z.null(),
+});
+
 // organization.created — Story 6-1. Bootstrap-tooling provisioning emits
 // this event when a new org row lands. `actorId` is null (system event —
 // the org has no users yet when this fires), and the variant carries the
@@ -253,6 +285,8 @@ export const AuditEventSchema = z.discriminatedUnion('eventType', [
   ApprovalWorkflowChangedSchema,
   SessionRevokedSchema,
   OrganizationCreatedSchema,
+  BlockerOpenedSchema,
+  BlockerResolvedSchema,
 ]);
 
 export type AuditEvent = z.infer<typeof AuditEventSchema>;
@@ -271,6 +305,8 @@ export type VisibilityRuleChanged = z.infer<typeof VisibilityRuleChangedSchema>;
 export type ApprovalWorkflowChanged = z.infer<typeof ApprovalWorkflowChangedSchema>;
 export type SessionRevoked = z.infer<typeof SessionRevokedSchema>;
 export type OrganizationCreated = z.infer<typeof OrganizationCreatedSchema>;
+export type BlockerOpened = z.infer<typeof BlockerOpenedSchema>;
+export type BlockerResolved = z.infer<typeof BlockerResolvedSchema>;
 
 /** All declared event types — kept in sync with the discriminator union. */
 export const AUDIT_EVENT_TYPES = [
@@ -287,6 +323,8 @@ export const AUDIT_EVENT_TYPES = [
   'approval_workflow.changed',
   'session.revoked',
   'organization.created',
+  'blocker.opened',
+  'blocker.resolved',
 ] as const satisfies readonly AuditEventType[];
 
 /**

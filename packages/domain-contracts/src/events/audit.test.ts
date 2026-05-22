@@ -116,6 +116,20 @@ const SAMPLES: Record<string, AuditEvent> = {
     before: { targetUserId: UUID_D, revokedSessionCount: 2 },
     after: null,
   }) as AuditEvent,
+  'blocker.opened': base({
+    eventType: 'blocker.opened',
+    entityType: 'employee_blocker',
+    reason: 'Active PIP — see HR ticket TKT-12345 for details',
+    before: null,
+    after: { employeeId: UUID_D, kind: 'PIP' },
+  }) as AuditEvent,
+  'blocker.resolved': base({
+    eventType: 'blocker.resolved',
+    entityType: 'employee_blocker',
+    reason: 'HR concluded the PIP successfully',
+    before: { employeeId: UUID_D, kind: 'PIP' },
+    after: null,
+  }) as AuditEvent,
   'organization.created': base({
     // Story 6-1: bootstrap-tooling provisioning event. actorId is null
     // because the org has no users when the row is created.
@@ -146,8 +160,8 @@ test('AUDIT_EVENT_TYPES enumerates exactly the variants of the discriminated uni
   );
   assert.equal(
     arrayTypes.size,
-    13,
-    'PRD §10.1 enumerates 11 event types + session.revoked (Story 2-3) + organization.created (Story 6-1)',
+    15,
+    'PRD §10.1 (11) + session.revoked (Story 2-3) + organization.created (Story 6-1) + blocker.opened/resolved (Story 6-2b) = 15',
   );
 });
 
