@@ -214,15 +214,6 @@ export class AuthController {
       throw new UnauthorizedException('User is not provisioned for any role in this organization');
     }
 
-    // Story 2-7 AC2: once the first OIDC-linked admin successfully signs
-    // in for this org, the bootstrap password fallback self-disables.
-    // Idempotent — subsequent admin sign-ins are no-ops at the DB layer.
-    // Non-admin sign-ins do NOT disable bootstrap (a manager logging in
-    // first shouldn't lock admins out of the fallback path).
-    if (role === 'ADMIN') {
-      await this.bootstrap.disable(user.organizationId);
-    }
-
     // Mint a fresh session jti and register it in Redis (Story 2-3 AC1).
     // Subsequent api calls validate the jti is still present; the admin
     // revoke endpoint deletes it.
@@ -245,6 +236,25 @@ export class AuthController {
       }),
       this.jwt.signRefresh({ sub: user.id, org: user.organizationId, jti }),
     ]);
+
+    // Story 2-7 AC2: once the first OIDC-linked admin successfully signs
+    // in for this org, the bootstrap password fallback self-disables.
+    // Idempotent — subsequent admin sign-ins are no-ops at the DB layer.
+    // Non-admin sign-ins do NOT disable bootstrap (a manager logging in
+    // first shouldn't lock admins out of the fallback path).
+    //
+    // Placed AFTER successful token mint so a JWT/Redis failure does NOT
+    // permanently disable the bootstrap fallback without returning a
+    // session to the admin (Epic-2 verification pass MEDIUM-2 fix).
+    if (role === 'ADMIN') {
+      // Best-effort — a disable failure here must not abort an
+      // otherwise-successful login. Logged for triage.
+      await this.bootstrap.disable(user.organizationId).catch((err) => {
+        this.logger.warn(
+          `bootstrap.disable failed for org ${user.organizationId} after successful admin OIDC sign-in: ${(err as Error).message}`,
+        );
+      });
+    }
 
     return {
       accessToken,

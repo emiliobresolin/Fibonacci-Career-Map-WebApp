@@ -132,17 +132,26 @@ export class OutboxRelayConsumer extends WorkerHost implements OnModuleDestroy {
         // discriminated-union schema before persisting. A malformed
         // event_type/payload fails fast and routes to DLQ rather than
         // landing in audit_events with a shape no consumer can read.
+        const payloadObj =
+          typeof row.payload === 'object' && row.payload !== null && !Array.isArray(row.payload)
+            ? (row.payload as Record<string, unknown>)
+            : {};
+        // The outbox row carries the structural / routing fields
+        // (organization_id, aggregate_type, aggregate_id); the payload
+        // carries the variant-specific fields PLUS the actor identity.
+        // The candidate is the merged shape the AuditEvent discriminated
+        // union expects. `actorId` MUST come from the payload (producers
+        // include it on every emit); the explicit `null` default is the
+        // system-actor fallback.
         const candidate = {
           eventId: row.event_id,
           occurredAt: row.created_at.toISOString(),
-          actorId: null,
+          actorId: null as string | null,
           organizationId: row.organization_id,
           entityType: row.aggregate_type,
           entityId: row.aggregate_id,
           eventType: row.event_type,
-          ...(typeof row.payload === 'object' && row.payload !== null && !Array.isArray(row.payload)
-            ? (row.payload as Record<string, unknown>)
-            : {}),
+          ...payloadObj,
         };
         const parsed = safeParseAuditEvent(candidate);
         if (!parsed.ok) {
@@ -154,20 +163,39 @@ export class OutboxRelayConsumer extends WorkerHost implements OnModuleDestroy {
             `outbox-relay: payload schema validation failed for ${row.event_id} (eventType=${row.event_type}): ${parsed.error.message}`,
           );
         }
+        const event = parsed.event;
+        // Persist the audit row from the VALIDATED event, not from the
+        // raw outbox columns. Three reasons:
+        //   1. actor_id comes from event.actorId (producer convention),
+        //      not the outbox row (which has no actor column).
+        //   2. before / after are STRUCTURED fields on the variant,
+        //      not the full payload blob.
+        //   3. entity_id is nullable per the schema (org-scope events
+        //      have null entity_id), so we mustn't unconditionally
+        //      cast to ::uuid.
+        // Story 3-3 BLOCKER fix (Epic-2 verification pass).
+        // Every discriminated-union variant declares `before` and `after`
+        // (some as z.null()), so the keys always exist on `event`. Reason
+        // is variant-specific — present on approve/reject/promotion variants,
+        // absent or nullable elsewhere; coalesce to null for the column.
+        const beforeJson = event.before === null ? null : JSON.stringify(event.before);
+        const afterJson = event.after === null ? null : JSON.stringify(event.after);
+        const reasonValue = 'reason' in event && typeof event.reason === 'string' ? event.reason : null;
 
         try {
           await tx.$executeRaw`
             INSERT INTO "audit_events"
-              ("id", "organization_id", "actor_id", "event_type", "entity_type", "entity_id", "before", "after", "occurred_at")
+              ("id", "organization_id", "actor_id", "event_type", "entity_type", "entity_id", "before", "after", "reason", "occurred_at")
             VALUES (
-              ${row.event_id}::uuid,
-              ${row.organization_id}::uuid,
-              NULL,
-              ${row.event_type},
-              ${row.aggregate_type},
-              ${row.aggregate_id}::uuid,
-              NULL,
-              ${row.payload}::jsonb,
+              ${event.eventId}::uuid,
+              ${event.organizationId}::uuid,
+              ${event.actorId}::uuid,
+              ${event.eventType},
+              ${event.entityType},
+              ${event.entityId}::uuid,
+              ${beforeJson}::jsonb,
+              ${afterJson}::jsonb,
+              ${reasonValue},
               ${row.created_at}::timestamptz
             )
           `;

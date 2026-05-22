@@ -80,6 +80,13 @@ export class SessionsController {
     // Audit emission via outbox (AC4). The relay (Story 3-3) validates
     // this payload against the AuditEvent taxonomy (Story 3-4 added the
     // session.revoked variant) and lands an audit_events row.
+    //
+    // `actorId` is part of the payload (not the outbox row's structural
+    // fields) by convention: the relay reads it from the validated
+    // event and persists it into audit_events.actor_id. Without this,
+    // the row's actor_id would be NULL and the audit-read API's self-only
+    // RBAC scope would never match (revealed by the Epic-2 verification
+    // pass on Story 3-3).
     const eventId = randomUUID();
     await this.prisma.outboxEvent.create({
       data: {
@@ -89,6 +96,7 @@ export class SessionsController {
         aggregateId: userId,
         eventType: 'session.revoked',
         payload: {
+          actorId: actor.user_id,
           reason: 'Admin-initiated forced logout',
           before: {
             targetUserId: userId,

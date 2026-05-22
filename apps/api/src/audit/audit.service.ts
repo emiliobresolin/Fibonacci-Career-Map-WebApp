@@ -170,6 +170,9 @@ function toCsvRow(row: AuditEventRow): string {
     if (/[,"\r\n]/.test(v)) return `"${v.replace(/"/g, '""')}"`;
     return v;
   };
+  // Every column flows through `esc` exactly once. The previous version
+  // pre-escaped `reason` and then re-escaped via the `.map`, which
+  // double-quoted any reason containing commas/quotes/newlines.
   return [
     row.id,
     row.occurredAt,
@@ -178,8 +181,8 @@ function toCsvRow(row: AuditEventRow): string {
     row.eventType,
     row.entityType,
     row.entityId,
-    esc(row.reason),
+    row.reason,
   ]
-    .map((v, i) => (i === 7 ? (v ?? '') : esc((v as string) ?? null)))
+    .map((v) => esc(v))
     .join(',') + '\n';
 }

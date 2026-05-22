@@ -8,6 +8,7 @@ import {
   Res,
   UnauthorizedException,
 } from '@nestjs/common';
+import { AUDIT_EVENT_TYPES } from '@fcm/domain-contracts';
 import type { Request, Response } from 'express';
 
 import { Roles } from '../auth/roles.decorator.js';
@@ -15,19 +16,11 @@ import type { RequestUser } from '../auth/auth.types.js';
 import { AuditService } from './audit.service.js';
 import type { ActorClaims, AuditListQuery } from './audit.types.js';
 
-const VALID_EVENT_TYPES = new Set([
-  'evidence.submitted',
-  'evidence.approved',
-  'evidence.rejected',
-  'score.recalculated',
-  'configuration.changed',
-  'promotion.initiated',
-  'promotion.decided',
-  'promotion.completed',
-  'role_assignment.changed',
-  'visibility_rule.changed',
-  'approval_workflow.changed',
-]);
+// Import the canonical event-type list from the contract module so the
+// filter accepts every declared variant (including `session.revoked`,
+// which the hand-maintained list omitted) and stays in sync as the
+// taxonomy grows. Story 3-5 BLOCKER fix from Epic-2 verification pass.
+const VALID_EVENT_TYPES = new Set<string>(AUDIT_EVENT_TYPES);
 
 /**
  * Audit read controller (Story 3-5).

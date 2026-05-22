@@ -13,3 +13,5 @@ logs/
 Thumbs.db
 .pnpm-store/
 *.tsbuildinfo
+# Scratch / story scratchpads — never commit
+tmp/
