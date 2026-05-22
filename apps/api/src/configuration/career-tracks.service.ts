@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import {
   BadRequestException,
   ConflictException,
@@ -12,6 +10,7 @@ import { Prisma } from '@prisma/client';
 import type { ActorContext } from '../auth/actor-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { withOrgScope } from '../prisma/rls.helpers.js';
+import { emitConfigurationChanged } from './audit.js';
 import { CareerTracksRepository, type CareerTrackRow } from './career-tracks.repository.js';
 
 /** Input shape for create. `slug` is required and validated against
@@ -106,7 +105,13 @@ export class CareerTracksService {
             active: true,
           },
         });
-        await emitConfigChanged(tx, organizationId, actor, row, null, row);
+        await emitConfigurationChanged(tx, organizationId, actor, {
+          configEntityType: 'career_track',
+          entityId: row.id,
+          before: null,
+          after: row,
+          serialize: serializeCareerTrackRow,
+        });
         return row;
       });
     } catch (err) {
@@ -147,7 +152,13 @@ export class CareerTracksService {
           throw new NotFoundException({ error: 'not_found', message: 'Unknown career track' });
         }
         const after = await tx.careerTrack.update({ where: { id }, data: patch });
-        await emitConfigChanged(tx, organizationId, actor, after, before, after);
+        await emitConfigurationChanged(tx, organizationId, actor, {
+          configEntityType: 'career_track',
+          entityId: after.id,
+          before,
+          after,
+          serialize: serializeCareerTrackRow,
+        });
         return after;
       });
     } catch (err) {
@@ -183,7 +194,13 @@ export class CareerTracksService {
         where: { id },
         data: { active: false },
       });
-      await emitConfigChanged(tx, organizationId, actor, after, before, after);
+      await emitConfigurationChanged(tx, organizationId, actor, {
+        configEntityType: 'career_track',
+        entityId: after.id,
+        before,
+        after,
+        serialize: serializeCareerTrackRow,
+      });
       return after;
     });
   }
@@ -248,51 +265,11 @@ function validateDisplayOrder(raw: unknown): number {
   return raw;
 }
 
-/** Emit one `configuration.changed` outbox event for a row mutation.
- *  Uses `field: '*'` to signal a whole-row change; `beforeValue` and
- *  `afterValue` carry the full row state so downstream readers can
- *  reconstruct without re-fetching. */
-async function emitConfigChanged(
-  tx: Prisma.TransactionClient,
-  organizationId: string,
-  actor: ActorContext,
-  entityRow: CareerTrackRow,
-  before: CareerTrackRow | null,
-  after: CareerTrackRow | null,
-): Promise<void> {
-  // Cast through `Prisma.InputJsonValue` because Prisma's generated
-  // type requires recursive JSON-value typing that `Record<string, unknown>`
-  // does not satisfy. The runtime shape is JSON-serializable by
-  // construction (UUIDs/strings/booleans/numbers/null + nested
-  // serializeRow output), so the cast is safe.
-  const payload: Prisma.InputJsonValue = {
-    actorId: actor.user_id,
-    reason: null,
-    before: {
-      configEntityType: 'career_track',
-      configEntityId: entityRow.id,
-      field: '*',
-      beforeValue: before === null ? null : (serializeRow(before) as Prisma.InputJsonValue),
-    },
-    after: {
-      afterValue: after === null ? null : (serializeRow(after) as Prisma.InputJsonValue),
-    },
-  };
-  await tx.outboxEvent.create({
-    data: {
-      eventId: randomUUID(),
-      organizationId,
-      aggregateType: 'configuration',
-      aggregateId: entityRow.id,
-      eventType: 'configuration.changed',
-      payload,
-    },
-  });
-}
-
 /** Serialize a CareerTrackRow for the audit payload. Dates become ISO
- *  strings so the JSONB column stores a stable canonical shape. */
-function serializeRow(row: CareerTrackRow): Record<string, unknown> {
+ *  strings so the JSONB column stores a stable canonical shape.
+ *  Passed to {@link emitConfigurationChanged} so the shared audit
+ *  helper doesn't need to know about CareerTrack-specific columns. */
+function serializeCareerTrackRow(row: CareerTrackRow): Record<string, unknown> {
   return {
     id: row.id,
     organizationId: row.organizationId,

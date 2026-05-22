@@ -1,5 +1,3 @@
-import { randomUUID } from 'node:crypto';
-
 import {
   BadRequestException,
   ConflictException,
@@ -13,6 +11,7 @@ import { Prisma } from '@prisma/client';
 import type { ActorContext } from '../auth/actor-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { withOrgScope } from '../prisma/rls.helpers.js';
+import { emitConfigurationChanged } from './audit.js';
 import { CareerTracksRepository } from './career-tracks.repository.js';
 import { LevelsRepository, type LevelRow } from './levels.repository.js';
 
@@ -122,7 +121,13 @@ export class LevelsService {
             active: true,
           },
         });
-        await emitConfigChanged(tx, organizationId, actor, row, null, row);
+        await emitConfigurationChanged(tx, organizationId, actor, {
+          configEntityType: 'level',
+          entityId: row.id,
+          before: null,
+          after: row,
+          serialize: serializeLevelRow,
+        });
         return row;
       });
     } catch (err) {
@@ -176,7 +181,13 @@ export class LevelsService {
           finalizedBand = { start: scoreBandStart, end: scoreBandEnd };
         }
         const after = await tx.level.update({ where: { id }, data: patch });
-        await emitConfigChanged(tx, organizationId, actor, after, before, after);
+        await emitConfigurationChanged(tx, organizationId, actor, {
+          configEntityType: 'level',
+          entityId: after.id,
+          before,
+          after,
+          serialize: serializeLevelRow,
+        });
         return after;
       });
     } catch (err) {
@@ -214,7 +225,13 @@ export class LevelsService {
         where: { id },
         data: { active: false },
       });
-      await emitConfigChanged(tx, organizationId, actor, after, before, after);
+      await emitConfigurationChanged(tx, organizationId, actor, {
+        configEntityType: 'level',
+        entityId: after.id,
+        before,
+        after,
+        serialize: serializeLevelRow,
+      });
       return after;
     });
   }
@@ -445,41 +462,9 @@ function isExclusionViolation(err: unknown): boolean {
   return false;
 }
 
-/** Emit one `configuration.changed` outbox event for a level mutation. */
-async function emitConfigChanged(
-  tx: Prisma.TransactionClient,
-  organizationId: string,
-  actor: ActorContext,
-  entityRow: LevelRow,
-  before: LevelRow | null,
-  after: LevelRow | null,
-): Promise<void> {
-  const payload: Prisma.InputJsonValue = {
-    actorId: actor.user_id,
-    reason: null,
-    before: {
-      configEntityType: 'level',
-      configEntityId: entityRow.id,
-      field: '*',
-      beforeValue: before === null ? null : (serializeRow(before) as Prisma.InputJsonValue),
-    },
-    after: {
-      afterValue: after === null ? null : (serializeRow(after) as Prisma.InputJsonValue),
-    },
-  };
-  await tx.outboxEvent.create({
-    data: {
-      eventId: randomUUID(),
-      organizationId,
-      aggregateType: 'configuration',
-      aggregateId: entityRow.id,
-      eventType: 'configuration.changed',
-      payload,
-    },
-  });
-}
-
-function serializeRow(row: LevelRow): Record<string, unknown> {
+/** Serialize a LevelRow for the audit payload. Dates become ISO
+ *  strings so the JSONB column stores a stable canonical shape. */
+function serializeLevelRow(row: LevelRow): Record<string, unknown> {
   return {
     id: row.id,
     organizationId: row.organizationId,

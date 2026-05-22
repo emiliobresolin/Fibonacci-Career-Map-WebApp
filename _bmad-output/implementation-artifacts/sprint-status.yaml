@@ -56,7 +56,7 @@ development_status:
   epic-7: in-progress
   7-1-career-tracks-crud-api-audit: done
   7-2-levels-crud-with-non-overlapping-band-enforcement: done
-  7-3-layers-crud: backlog
+  7-3-layers-crud: done
   7-4-requirements-crud-weight-mandatory-flag-evidence-type-expiry: backlog
   7-5-promotion-rules-crud-per-level: backlog
   7-6-visibility-rules-crud: backlog

@@ -3,7 +3,9 @@ import { Module } from '@nestjs/common';
 import { CareerTracksController } from './career-tracks.controller.js';
 import { CareerTracksRepository } from './career-tracks.repository.js';
 import { CareerTracksService } from './career-tracks.service.js';
+import { LayersController } from './layers.controller.js';
 import { LayersRepository } from './layers.repository.js';
+import { LayersService } from './layers.service.js';
 import { LevelsController } from './levels.controller.js';
 import { LevelsRepository } from './levels.repository.js';
 import { LevelsService } from './levels.service.js';
@@ -29,13 +31,14 @@ import { RequirementsRepository } from './requirements.repository.js';
  * levels / layers / requirements / promotion_rules.
  */
 @Module({
-  controllers: [CareerTracksController, LevelsController],
+  controllers: [CareerTracksController, LevelsController, LayersController],
   providers: [
     CareerTracksRepository,
     CareerTracksService,
     LevelsRepository,
     LevelsService,
     LayersRepository,
+    LayersService,
     RequirementsRepository,
     PromotionRulesRepository,
   ],
@@ -45,6 +48,7 @@ import { RequirementsRepository } from './requirements.repository.js';
     LevelsRepository,
     LevelsService,
     LayersRepository,
+    LayersService,
     RequirementsRepository,
     PromotionRulesRepository,
   ],
