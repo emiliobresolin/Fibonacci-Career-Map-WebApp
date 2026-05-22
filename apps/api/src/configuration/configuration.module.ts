@@ -6,6 +6,8 @@ import { CareerTracksService } from './career-tracks.service.js';
 import { LayersController } from './layers.controller.js';
 import { LayersRepository } from './layers.repository.js';
 import { LayersService } from './layers.service.js';
+import { OrgSettingsController } from './org-settings.controller.js';
+import { OrgSettingsService } from './org-settings.service.js';
 import { LevelsController } from './levels.controller.js';
 import { LevelsRepository } from './levels.repository.js';
 import { LevelsService } from './levels.service.js';
@@ -41,6 +43,7 @@ import { RequirementsService } from './requirements.service.js';
     LayersController,
     RequirementsController,
     PromotionRulesController,
+    OrgSettingsController,
   ],
   providers: [
     CareerTracksRepository,
@@ -53,6 +56,7 @@ import { RequirementsService } from './requirements.service.js';
     RequirementsService,
     PromotionRulesRepository,
     PromotionRulesService,
+    OrgSettingsService,
   ],
   exports: [
     CareerTracksRepository,
@@ -65,6 +69,7 @@ import { RequirementsService } from './requirements.service.js';
     RequirementsService,
     PromotionRulesRepository,
     PromotionRulesService,
+    OrgSettingsService,
   ],
 })
 export class ConfigurationModule {}

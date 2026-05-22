@@ -104,3 +104,46 @@ export function isoDates<T extends Record<string, unknown>>(row: T): Record<stri
   }
   return out;
 }
+
+/**
+ * Emit one `visibility_rule.changed` outbox event (Story 7-6, PRD §8.6).
+ *
+ * Distinct from `configuration.changed` because the audit schema is
+ * different (`before.fromSetting` + `after.toSetting` vs.
+ * `before.beforeValue` + `after.afterValue`), AND because the Map
+ * Data Contract (Epic 10) will filter on this event type specifically
+ * to invalidate cached projections. Using a dedicated event type
+ * lets the map cache subscribe narrowly instead of grepping the
+ * generic `configuration.changed` stream.
+ *
+ * The relay (Story 3-3) consumes the same outbox row and persists it
+ * to `audit_events` with `entityType: 'visibility_rule'`,
+ * `entityId: <organizationId>`.
+ */
+export async function emitVisibilityRuleChanged(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  actor: ActorContext,
+  params: {
+    fromSetting: 'OWN_ONLY' | 'TEAM' | 'ORG_SUMMARY' | 'ORG_FULL';
+    toSetting: 'OWN_ONLY' | 'TEAM' | 'ORG_SUMMARY' | 'ORG_FULL';
+    reason?: string | null;
+  },
+): Promise<void> {
+  const payload: Prisma.InputJsonValue = {
+    actorId: actor.user_id,
+    reason: params.reason ?? null,
+    before: { fromSetting: params.fromSetting },
+    after: { toSetting: params.toSetting },
+  };
+  await tx.outboxEvent.create({
+    data: {
+      eventId: randomUUID(),
+      organizationId,
+      aggregateType: 'visibility_rule',
+      aggregateId: organizationId,
+      eventType: 'visibility_rule.changed',
+      payload,
+    },
+  });
+}

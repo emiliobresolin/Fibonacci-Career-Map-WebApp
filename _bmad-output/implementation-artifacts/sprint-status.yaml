@@ -59,7 +59,7 @@ development_status:
   7-3-layers-crud: done
   7-4-requirements-crud-weight-mandatory-flag-evidence-type-expiry: done
   7-5-promotion-rules-crud-per-level: done
-  7-6-visibility-rules-crud: backlog
+  7-6-visibility-rules-crud: done
   7-7-approval-workflow-crud-with-per-level-overrides: backlog
   7-8-change-impact-preview-endpoint: backlog
   7-9-configurationchanged-outbox-emission-on-save: backlog
