@@ -10,7 +10,9 @@ import { LevelsController } from './levels.controller.js';
 import { LevelsRepository } from './levels.repository.js';
 import { LevelsService } from './levels.service.js';
 import { PromotionRulesRepository } from './promotion-rules.repository.js';
+import { RequirementsController } from './requirements.controller.js';
 import { RequirementsRepository } from './requirements.repository.js';
+import { RequirementsService } from './requirements.service.js';
 
 /**
  * Configuration module (Story 6-2 + 7-1, Arch §6.2, PRD §8).
@@ -31,7 +33,12 @@ import { RequirementsRepository } from './requirements.repository.js';
  * levels / layers / requirements / promotion_rules.
  */
 @Module({
-  controllers: [CareerTracksController, LevelsController, LayersController],
+  controllers: [
+    CareerTracksController,
+    LevelsController,
+    LayersController,
+    RequirementsController,
+  ],
   providers: [
     CareerTracksRepository,
     CareerTracksService,
@@ -40,6 +47,7 @@ import { RequirementsRepository } from './requirements.repository.js';
     LayersRepository,
     LayersService,
     RequirementsRepository,
+    RequirementsService,
     PromotionRulesRepository,
   ],
   exports: [
@@ -50,6 +58,7 @@ import { RequirementsRepository } from './requirements.repository.js';
     LayersRepository,
     LayersService,
     RequirementsRepository,
+    RequirementsService,
     PromotionRulesRepository,
   ],
 })
