@@ -107,13 +107,21 @@ export const QUEUES: Record<QueueName, QueueDef> = {
   },
 };
 
-/** Queues whose producer and/or consumer ship now. Future stories extend
- *  the set when they ship their producer/consumer. Stories shipping queues:
- *  4-1 → __smoke; 3-3 → audit.outbox-relay; 3-6 → snapshot.partition-maintenance. */
+/** Every architecture-listed queue (Arch §7.2) is now registered, per
+ *  Story 4-2 AC1. The five queues whose owning story hasn't shipped yet
+ *  have stub consumers in `apps/api/src/jobs/stub-consumers/` that
+ *  throw `NotImplementedError` — registering the queue early means
+ *  producers can wire against it as soon as they're built, without
+ *  waiting for the consumer story. */
 export const ACTIVE_QUEUES: readonly QueueName[] = [
   '__smoke',
   'audit.outbox-relay',
+  'scoring.recalc-employee',
+  'scoring.recalc-org-bulk',
+  'evidence.expiry-scan',
   'snapshot.partition-maintenance',
+  'notification.deliver',
+  'observability.client-metrics',
 ] as const;
 
 /** Returns the DLQ name for a queue if it has one, else null. */

@@ -24,7 +24,7 @@ development_status:
   2-5-layer-2-actorcontext-propagation-and-self-approval-guard-primitive: done
   2-6-layer-3-postgres-row-level-security-policies-with-per-request-org-scoping: done
   2-7-bootstrap-admin-fallback-credentials-and-oidc-outage-recovery-codes: done
-  epic-3: backlog
+  epic-3: done
   3-1-audit-events-table-monthly-partitioning-and-append-only-db-enforcement: done
   3-2-outbox-events-table-and-post-commit-listen-notify-trigger: done
   3-3-outbox-relay-worker-audit-outbox-relay: done
@@ -33,7 +33,7 @@ development_status:
   3-6-audit-partition-maintenance-scheduled-job: done
   epic-4: backlog
   4-1-bullmq-module-worker-bootstrap-and-per-queue-configuration: done
-  4-2-domain-queue-definitions: backlog
+  4-2-domain-queue-definitions: done
   4-3-idempotency-registry-recalc-jobs: backlog
   4-4-cron-scheduler-pattern: backlog
   4-5-internal-dlq-admin-tool-and-depth-alerting: backlog

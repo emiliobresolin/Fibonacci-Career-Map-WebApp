@@ -3,7 +3,14 @@ import { Module, type DynamicModule } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 
 import type { Env } from '../common/env.config.js';
+import { ObservabilityModule } from '../observability/observability.module.js';
+import { QueueMetricsService } from './queue-metrics.service.js';
 import { SmokeConsumer } from './smoke.consumer.js';
+import { EvidenceExpiryScanStubConsumer } from './stub-consumers/evidence-expiry-scan.consumer.js';
+import { NotificationDeliverStubConsumer } from './stub-consumers/notification-deliver.consumer.js';
+import { ObservabilityClientMetricsStubConsumer } from './stub-consumers/observability-client-metrics.consumer.js';
+import { ScoringRecalcEmployeeStubConsumer } from './stub-consumers/scoring-recalc-employee.consumer.js';
+import { ScoringRecalcOrgBulkStubConsumer } from './stub-consumers/scoring-recalc-org-bulk.consumer.js';
 import { ACTIVE_QUEUES, QUEUES, dlqOf, type QueueName } from './queues.config.js';
 
 /**
@@ -62,9 +69,23 @@ export class JobsModule {
         : []),
     ]);
 
+    // Stub consumers (Story 4-2) — every architecture-listed queue gets
+    // a NotImplementedError-throwing consumer until the owning story
+    // ships the real one. Stub consumers run in worker mode only.
+    const stubConsumers = [
+      ScoringRecalcEmployeeStubConsumer,
+      ScoringRecalcOrgBulkStubConsumer,
+      EvidenceExpiryScanStubConsumer,
+      NotificationDeliverStubConsumer,
+      ObservabilityClientMetricsStubConsumer,
+    ];
+
     return {
       module: JobsModule,
       imports: [
+        // ObservabilityModule for MetricsService (QueueMetricsService
+        // registers gauges + histograms against the shared registry).
+        ObservabilityModule,
         BullModule.forRootAsync({
           imports: [ConfigModule],
           useFactory: (config: ConfigService<Env, true>) => {
@@ -99,8 +120,11 @@ export class JobsModule {
         }),
         ...queueRegistrations,
       ],
-      providers: opts.mode === 'worker' ? [SmokeConsumer] : [],
-      exports: queueRegistrations,
+      providers: [
+        QueueMetricsService,
+        ...(opts.mode === 'worker' ? [SmokeConsumer, ...stubConsumers] : []),
+      ],
+      exports: [...queueRegistrations, QueueMetricsService],
     };
   }
 }
