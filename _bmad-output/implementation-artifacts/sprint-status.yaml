@@ -31,13 +31,13 @@ development_status:
   3-4-event-type-taxonomy-and-auditevent-payload-contract-in-domain-contracts: done
   3-5-role-scoped-audit-read-api-and-csv-export-endpoint-skeleton: done
   3-6-audit-partition-maintenance-scheduled-job: done
-  epic-4: backlog
+  epic-4: done
   4-1-bullmq-module-worker-bootstrap-and-per-queue-configuration: done
   4-2-domain-queue-definitions: done
   4-3-idempotency-registry-recalc-jobs: done
   4-4-cron-scheduler-pattern: done
   4-5-internal-dlq-admin-tool-and-depth-alerting: done
-  4-6-recalculation-status-primitives-exposed-via-domain-contracts: backlog
+  4-6-recalculation-status-primitives-exposed-via-domain-contracts: done
   epic-5: backlog
   5-1-socket-io-server-and-redis-adapter: backlog
   5-2-websocket-handshake-authentication-using-the-same-session-jwt: backlog
