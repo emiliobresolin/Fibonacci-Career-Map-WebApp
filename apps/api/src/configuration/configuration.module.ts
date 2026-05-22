@@ -6,6 +6,7 @@ import { CareerTracksService } from './career-tracks.service.js';
 import { LayersController } from './layers.controller.js';
 import { LayersRepository } from './layers.repository.js';
 import { LayersService } from './layers.service.js';
+import { ApprovalWorkflowController } from './approval-workflow.controller.js';
 import { OrgSettingsController } from './org-settings.controller.js';
 import { OrgSettingsService } from './org-settings.service.js';
 import { LevelsController } from './levels.controller.js';
@@ -44,6 +45,7 @@ import { RequirementsService } from './requirements.service.js';
     RequirementsController,
     PromotionRulesController,
     OrgSettingsController,
+    ApprovalWorkflowController,
   ],
   providers: [
     CareerTracksRepository,

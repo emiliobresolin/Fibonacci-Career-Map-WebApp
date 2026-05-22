@@ -147,3 +147,40 @@ export async function emitVisibilityRuleChanged(
     },
   });
 }
+
+/**
+ * Emit one `approval_workflow.changed` outbox event (Story 7-7, PRD §8.7).
+ *
+ * Mirrors `emitVisibilityRuleChanged`'s shape (specific event type so
+ * approval-affected modules — Epic 13 promotion workflow — can
+ * subscribe narrowly). Payload contract matches
+ * `ApprovalWorkflowChangedSchema` in `@fcm/domain-contracts`:
+ * `before.fromKind` + `after.toKind`.
+ */
+export async function emitApprovalWorkflowChanged(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  actor: ActorContext,
+  params: {
+    fromKind: 'SINGLE' | 'DUAL_MANAGER' | 'HR_GATE';
+    toKind: 'SINGLE' | 'DUAL_MANAGER' | 'HR_GATE';
+    reason?: string | null;
+  },
+): Promise<void> {
+  const payload: Prisma.InputJsonValue = {
+    actorId: actor.user_id,
+    reason: params.reason ?? null,
+    before: { fromKind: params.fromKind },
+    after: { toKind: params.toKind },
+  };
+  await tx.outboxEvent.create({
+    data: {
+      eventId: randomUUID(),
+      organizationId,
+      aggregateType: 'approval_workflow',
+      aggregateId: organizationId,
+      eventType: 'approval_workflow.changed',
+      payload,
+    },
+  });
+}

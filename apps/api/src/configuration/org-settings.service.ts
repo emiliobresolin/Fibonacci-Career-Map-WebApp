@@ -4,17 +4,20 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { VisibilityDefault } from '@prisma/client';
+import { ApprovalWorkflow, VisibilityDefault } from '@prisma/client';
 
 import type { ActorContext } from '../auth/actor-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { withOrgScope } from '../prisma/rls.helpers.js';
-import { emitVisibilityRuleChanged } from './audit.js';
+import { emitApprovalWorkflowChanged, emitVisibilityRuleChanged } from './audit.js';
 
 export type VisibilitySetting = 'OWN_ONLY' | 'TEAM' | 'ORG_SUMMARY' | 'ORG_FULL';
+export type ApprovalWorkflowKind = 'SINGLE' | 'DUAL_MANAGER' | 'HR_GATE';
 
 const VALID_VISIBILITY: ReadonlyArray<VisibilitySetting> =
   Object.values(VisibilityDefault) as ReadonlyArray<VisibilitySetting>;
+const VALID_APPROVAL_WORKFLOW: ReadonlyArray<ApprovalWorkflowKind> =
+  Object.values(ApprovalWorkflow) as ReadonlyArray<ApprovalWorkflowKind>;
 
 /**
  * OrgSettingsService (Story 7-6, PRD FR-6.6 §8.6, §14.2).
@@ -100,6 +103,66 @@ export class OrgSettingsService {
       return { visibilityDefault: after.visibilityDefault as VisibilitySetting };
     });
   }
+
+  // ─── Approval Workflow (Story 7-7) ─────────────────────────────────
+  //
+  // Same shape as visibility: org-level enum column, SELECT FOR UPDATE
+  // serialization, idempotent no-op, dedicated `approval_workflow.changed`
+  // event for narrow subscribers (Epic 13 promotion workflow).
+  //
+  // Per-level override (the `/v1/levels/:id/approval-workflow` half of
+  // the AC) is **deferred as F7-7a** — no override column exists on
+  // `levels` or `promotion_rules`. Adding it requires a Prisma schema
+  // migration that's out of scope for the org-level half of this story.
+
+  async getApprovalWorkflow(
+    organizationId: string,
+  ): Promise<{ approvalWorkflowDefault: ApprovalWorkflowKind }> {
+    return withOrgScope(this.prisma, organizationId, async (tx) => {
+      const row = await tx.organization.findUnique({
+        where: { id: organizationId },
+        select: { approvalWorkflowDefault: true },
+      });
+      if (!row) {
+        throw new NotFoundException({ error: 'not_found', message: 'Unknown organization' });
+      }
+      return { approvalWorkflowDefault: row.approvalWorkflowDefault as ApprovalWorkflowKind };
+    });
+  }
+
+  async updateApprovalWorkflow(
+    organizationId: string,
+    input: { approvalWorkflowDefault: ApprovalWorkflowKind | string },
+    actor: ActorContext,
+  ): Promise<{ approvalWorkflowDefault: ApprovalWorkflowKind }> {
+    const next = validateApprovalWorkflow(input?.approvalWorkflowDefault);
+
+    return withOrgScope(this.prisma, organizationId, async (tx) => {
+      await tx.$executeRaw`SELECT id FROM organizations WHERE id = ${organizationId}::uuid FOR UPDATE`;
+
+      const before = await tx.organization.findUnique({
+        where: { id: organizationId },
+        select: { approvalWorkflowDefault: true },
+      });
+      if (!before) {
+        throw new NotFoundException({ error: 'not_found', message: 'Unknown organization' });
+      }
+      const fromKind = before.approvalWorkflowDefault as ApprovalWorkflowKind;
+      if (fromKind === next) {
+        return { approvalWorkflowDefault: fromKind };
+      }
+      const after = await tx.organization.update({
+        where: { id: organizationId },
+        data: { approvalWorkflowDefault: next },
+        select: { approvalWorkflowDefault: true },
+      });
+      await emitApprovalWorkflowChanged(tx, organizationId, actor, {
+        fromKind,
+        toKind: after.approvalWorkflowDefault as ApprovalWorkflowKind,
+      });
+      return { approvalWorkflowDefault: after.approvalWorkflowDefault as ApprovalWorkflowKind };
+    });
+  }
 }
 
 function validateVisibility(raw: unknown): VisibilitySetting {
@@ -110,5 +173,15 @@ function validateVisibility(raw: unknown): VisibilitySetting {
     });
   }
   return raw as VisibilitySetting;
+}
+
+function validateApprovalWorkflow(raw: unknown): ApprovalWorkflowKind {
+  if (typeof raw !== 'string' || !VALID_APPROVAL_WORKFLOW.includes(raw as ApprovalWorkflowKind)) {
+    throw new BadRequestException({
+      error: 'bad_request',
+      message: `approvalWorkflowDefault must be one of ${VALID_APPROVAL_WORKFLOW.join(', ')}`,
+    });
+  }
+  return raw as ApprovalWorkflowKind;
 }
 
