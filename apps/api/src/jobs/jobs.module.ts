@@ -6,6 +6,8 @@ import { DiscoveryModule } from '@nestjs/core';
 import type { Env } from '../common/env.config.js';
 import { ObservabilityModule } from '../observability/observability.module.js';
 import { CronRegistrarService } from './cron-registrar.service.js';
+import { DlqAdminController } from './dlq-admin.controller.js';
+import { DlqAdminService } from './dlq-admin.service.js';
 import { HeartbeatCron } from './heartbeat-cron.js';
 import { QueueMetricsService } from './queue-metrics.service.js';
 import { RecalcJobService } from './recalc-job.service.js';
@@ -128,9 +130,13 @@ export class JobsModule {
         }),
         ...queueRegistrations,
       ],
+      controllers: opts.mode === 'api' ? [DlqAdminController] : [],
       providers: [
         QueueMetricsService,
         RecalcJobService,
+        // DlqAdminService is api-mode only — it's the back-end of the
+        // /v1/dlq admin endpoints. The worker mode has no use for it.
+        ...(opts.mode === 'api' ? [DlqAdminService] : []),
         ...(opts.mode === 'worker'
           ? [
               SmokeConsumer,

@@ -36,7 +36,7 @@ development_status:
   4-2-domain-queue-definitions: done
   4-3-idempotency-registry-recalc-jobs: done
   4-4-cron-scheduler-pattern: done
-  4-5-internal-dlq-admin-tool-and-depth-alerting: backlog
+  4-5-internal-dlq-admin-tool-and-depth-alerting: done
   4-6-recalculation-status-primitives-exposed-via-domain-contracts: backlog
   epic-5: backlog
   5-1-socket-io-server-and-redis-adapter: backlog
