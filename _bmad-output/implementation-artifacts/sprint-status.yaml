@@ -53,7 +53,7 @@ development_status:
   6-4-first-admin-bootstrap-flow: done
   6-5-employee-roster-csv-bulk-import: done
   6-6-integration-test-seed-assign-fetch-map-employees-happy-path: done
-  epic-7: in-progress
+  epic-7: done
   7-1-career-tracks-crud-api-audit: done
   7-2-levels-crud-with-non-overlapping-band-enforcement: done
   7-3-layers-crud: done
@@ -64,7 +64,7 @@ development_status:
   7-8-change-impact-preview-endpoint: done
   7-9-configurationchanged-outbox-emission-on-save: done
   7-10-rollout-mode-admin-surface-and-transition-endpoint: done
-  7-11-admin-settings-ui-for-the-full-configuration-surface: backlog
+  7-11-admin-settings-ui-for-the-full-configuration-surface: done
   epic-8: backlog
   8-1-evidence-entity-and-state-machine: backlog
   8-2-pre-signed-s3-upload-slot-finalize-flow: backlog
