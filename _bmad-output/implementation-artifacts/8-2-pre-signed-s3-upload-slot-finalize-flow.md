@@ -1,6 +1,6 @@
 # Story 8.2: Pre-signed S3 upload slot + finalize flow
 
-Status: backlog
+Status: done
 
 ## Story
 

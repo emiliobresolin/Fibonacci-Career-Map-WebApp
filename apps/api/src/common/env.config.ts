@@ -67,6 +67,37 @@ export const envSchema = z
     // succeed) — same-origin calls from the web container are always allowed.
     // Production env-validation below promotes this to required.
     CORS_ALLOWED_ORIGINS: z.string().optional(),
+
+    // ─── Evidence storage (Story 8-2) ───────────────────────────────────────────
+    // S3 bucket holding evidence objects. Required in production; optional in
+    // dev/test so the api can boot without S3 wired. Keys land under
+    // `org/{organization_id}/evidence/{employee_id}/{evidence_id}/{filename}`
+    // (Arch §9.1 / AD-9). The bucket itself is provisioned by Story 1-5
+    // (terraform).
+    EVIDENCE_S3_BUCKET: z.string().min(1).optional(),
+    // Optional override of the S3 endpoint URL — used by LocalStack / Minio
+    // in dev. Leave unset in production so the SDK resolves the real AWS
+    // regional endpoint.
+    EVIDENCE_S3_ENDPOINT_URL: z.string().url().optional(),
+    // AWS region the bucket lives in. The SDK falls back to AWS_REGION /
+    // AWS_DEFAULT_REGION when unset, but pinning it here makes the
+    // intended region explicit at the app layer.
+    AWS_REGION: z.string().min(1).optional(),
+    // Upload-slot TTL in seconds (AC1: 15 min). Tunable for tests; production
+    // should leave the default.
+    EVIDENCE_UPLOAD_SLOT_TTL_SECONDS: z.coerce.number().int().positive().default(900),
+    // Max allowed size for a single file evidence upload (AC1
+    // "content-length-range bounded"). Defaults to 25 MiB which fits typical
+    // PDF / image / spreadsheet evidence without blowing the bucket's
+    // per-object lifecycle cost target. Operators can raise this for orgs
+    // that need to store screen recordings.
+    EVIDENCE_UPLOAD_MAX_BYTES: z.coerce.number().int().positive().default(25 * 1024 * 1024),
+    // Min upload size — 1 byte by default. A non-trivial minimum (e.g. 64)
+    // would block "empty file" uploads at the presigned-URL layer, but most
+    // S3 clients can't enforce that without server feedback; leave the
+    // minimum loose and let the requirement-type validation catch
+    // empty-payload cases.
+    EVIDENCE_UPLOAD_MIN_BYTES: z.coerce.number().int().nonnegative().default(1),
   })
   .superRefine((val, ctx) => {
     if (val.NODE_ENV !== 'production') return;
@@ -127,6 +158,24 @@ export const envSchema = z
     // they are graceful-degrade signals: if missing, the relevant subsystem
     // self-disables and logs a single warning at boot. Operators can opt out
     // intentionally for cost or per-env policy.
+    // Story 8-2: evidence storage requires both bucket and region in
+    // production. EVIDENCE_S3_ENDPOINT_URL stays optional (only set for
+    // LocalStack/Minio dev runs).
+    if (!val.EVIDENCE_S3_BUCKET) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['EVIDENCE_S3_BUCKET'],
+        message:
+          'EVIDENCE_S3_BUCKET is required when NODE_ENV=production (evidence finalize flow)',
+      });
+    }
+    if (!val.AWS_REGION) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['AWS_REGION'],
+        message: 'AWS_REGION is required when NODE_ENV=production (S3 client)',
+      });
+    }
   });
 
 export type Env = z.infer<typeof envSchema>;

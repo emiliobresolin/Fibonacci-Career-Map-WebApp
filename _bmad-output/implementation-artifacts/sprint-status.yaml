@@ -67,7 +67,7 @@ development_status:
   7-11-admin-settings-ui-for-the-full-configuration-surface: done
   epic-8: in-progress
   8-1-evidence-entity-and-state-machine: done
-  8-2-pre-signed-s3-upload-slot-finalize-flow: backlog
+  8-2-pre-signed-s3-upload-slot-finalize-flow: done
   8-3-pre-signed-retrieval-with-rbac-visibility-checks: backlog
   8-4-approve-reject-with-mandatory-reasons-and-approvalrecord: backlog
   8-5-admin-hr-override-approval-path: backlog

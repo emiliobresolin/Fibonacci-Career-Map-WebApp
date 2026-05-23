@@ -693,6 +693,18 @@ model Evidence {
   /// STRUCTURED and for un-uploaded DRAFTs. Pre-signed upload + finalize
   /// flow lands in Story 8-2.
   storageObjectKey String?       @map("storage_object_key")
+  /// S3 ETag of the uploaded object, captured from the HEAD response at
+  /// finalize time (Story 8-2 AC2). Null for non-FILE evidence and for
+  /// DRAFT rows that haven't been finalized.
+  storageEtag      String?       @map("storage_etag")
+  /// MIME type of the uploaded object (Story 8-2 AC2). Whitelisted by
+  /// the upload-slot endpoint and re-read from S3 at finalize for
+  /// defense-in-depth. Null for non-FILE / DRAFT.
+  contentType      String?       @map("content_type")
+  /// Object size in bytes (Story 8-2 AC2). BIGINT because S3 supports
+  /// objects up to 5 TiB even though evidence is usually KB-scale.
+  /// Null for non-FILE / DRAFT.
+  sizeBytes        BigInt?       @map("size_bytes")
   submittedAt      DateTime?     @map("submitted_at") @db.Timestamptz
   approvedAt       DateTime?     @map("approved_at") @db.Timestamptz
   expiresAt        DateTime?     @map("expires_at") @db.Timestamptz

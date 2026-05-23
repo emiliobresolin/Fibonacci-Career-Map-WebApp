@@ -4,6 +4,7 @@ import { AuditModule } from './audit/audit.module.js';
 import { AuthModule } from './auth/auth.module.js';
 import { CommonModule } from './common/common.module.js';
 import { ConfigurationModule } from './configuration/configuration.module.js';
+import { EvidenceModule } from './evidence/evidence.module.js';
 import { HealthModule } from './health/health.module.js';
 import { IdentityModule } from './identity/identity.module.js';
 import { JobsModule } from './jobs/jobs.module.js';
@@ -44,6 +45,7 @@ export class AppModule {
         AuditModule,
         OrganizationsModule,
         ConfigurationModule,
+        EvidenceModule,
         IdentityModule,
         SeedingModule,
         RealtimeModule.register({ mode: opts.mode }),
