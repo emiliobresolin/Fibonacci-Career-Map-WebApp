@@ -138,6 +138,25 @@ export const ConfigurationChangedSchema = AuditBaseSchema.extend({
   chunkTotal: z.number().int().positive().optional(),
 });
 
+/** Story 7-10 — org-level rollout mode (CALIBRATION ↔ ACTIVE). */
+export const PromotionModeSchema = z.enum(['CALIBRATION', 'ACTIVE']);
+
+export const OrganizationPromotionModeChangedSchema = AuditBaseSchema.extend({
+  eventType: z.literal('organization.promotion_mode.changed'),
+  entityType: z.literal('organization'),
+  // CALIBRATION → ACTIVE requires rationale ≥ 100 chars (per Arch §6.2);
+  // the schema accepts the nullable form so ACTIVE → CALIBRATION can
+  // omit it, but the service enforces the 100-char floor on the forward
+  // transition before this event is constructed.
+  reason: z.string().nullable(),
+  before: z.object({
+    fromMode: PromotionModeSchema,
+  }),
+  after: z.object({
+    toMode: PromotionModeSchema,
+  }),
+});
+
 export const PromotionInitiatedSchema = AuditBaseSchema.extend({
   eventType: z.literal('promotion.initiated'),
   entityType: z.literal('promotion'),
@@ -395,6 +414,7 @@ export const AuditEventSchema = z.discriminatedUnion('eventType', [
   RoleAssignmentChangedSchema,
   VisibilityRuleChangedSchema,
   ApprovalWorkflowChangedSchema,
+  OrganizationPromotionModeChangedSchema,
   SessionRevokedSchema,
   OrganizationCreatedSchema,
   BlockerOpenedSchema,
@@ -420,6 +440,7 @@ export type PromotionCompleted = z.infer<typeof PromotionCompletedSchema>;
 export type RoleAssignmentChanged = z.infer<typeof RoleAssignmentChangedSchema>;
 export type VisibilityRuleChanged = z.infer<typeof VisibilityRuleChangedSchema>;
 export type ApprovalWorkflowChanged = z.infer<typeof ApprovalWorkflowChangedSchema>;
+export type OrganizationPromotionModeChanged = z.infer<typeof OrganizationPromotionModeChangedSchema>;
 export type SessionRevoked = z.infer<typeof SessionRevokedSchema>;
 export type OrganizationCreated = z.infer<typeof OrganizationCreatedSchema>;
 export type BlockerOpened = z.infer<typeof BlockerOpenedSchema>;
@@ -443,6 +464,7 @@ export const AUDIT_EVENT_TYPES = [
   'role_assignment.changed',
   'visibility_rule.changed',
   'approval_workflow.changed',
+  'organization.promotion_mode.changed',
   'session.revoked',
   'organization.created',
   'blocker.opened',

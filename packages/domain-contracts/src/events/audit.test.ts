@@ -109,6 +109,14 @@ const SAMPLES: Record<string, AuditEvent> = {
     before: { fromKind: 'SINGLE' },
     after: { toKind: 'DUAL_MANAGER' },
   }) as AuditEvent,
+  // Story 7-10 — rollout-mode transition.
+  'organization.promotion_mode.changed': base({
+    eventType: 'organization.promotion_mode.changed',
+    entityType: 'organization',
+    reason: 'x'.repeat(100), // mirrors the 100-char floor the service enforces for the forward transition
+    before: { fromMode: 'CALIBRATION' },
+    after: { toMode: 'ACTIVE' },
+  }) as AuditEvent,
   'session.revoked': base({
     eventType: 'session.revoked',
     entityType: 'session',
@@ -218,7 +226,12 @@ test('AUDIT_EVENT_TYPES enumerates exactly the variants of the discriminated uni
   );
   assert.equal(
     arrayTypes.size,
-    20,
+    21,
+    // PRD §10.1 (11) + session.revoked (Story 2-3) + organization.created (Story 6-1)
+    // + blocker.opened/resolved (Story 6-2b) + configuration.seeded (Story 6-3)
+    // + bootstrap_admin.provisioned/disabled + recovery_codes.provisioned (Story 6-4)
+    // + employee.imported (Story 6-5) + organization.promotion_mode.changed (Story 7-10)
+    // = 21
     'PRD §10.1 (11) + session.revoked (Story 2-3) + organization.created (Story 6-1) + blocker.opened/resolved (Story 6-2b) + configuration.seeded (Story 6-3) + bootstrap_admin.provisioned/disabled + recovery_codes.provisioned (Story 6-4) + employee.imported (Story 6-5) = 20',
   );
 });

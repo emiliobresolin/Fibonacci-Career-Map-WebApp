@@ -208,6 +208,44 @@ export async function emitVisibilityRuleChanged(
 }
 
 /**
+ * Emit one `organization.promotion_mode.changed` outbox event (Story
+ * 7-10). Carries `before.fromMode` + `after.toMode`. `reason` carries
+ * the rationale (REQUIRED for CALIBRATION → ACTIVE per Arch §6.2;
+ * service enforces the 100-char floor before constructing the event).
+ *
+ * Distinct from `configuration.changed`: rollout mode is an org-level
+ * realtime trigger (org-wide banner per FR-7.14). The realtime gateway
+ * (Epic 5) filters on this event type to broadcast the banner.
+ */
+export async function emitPromotionModeChanged(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  actor: ActorContext,
+  params: {
+    fromMode: 'CALIBRATION' | 'ACTIVE';
+    toMode: 'CALIBRATION' | 'ACTIVE';
+    rationale: string | null;
+  },
+): Promise<void> {
+  const payload: Prisma.InputJsonValue = {
+    actorId: actor.user_id,
+    reason: params.rationale,
+    before: { fromMode: params.fromMode },
+    after: { toMode: params.toMode },
+  };
+  await tx.outboxEvent.create({
+    data: {
+      eventId: randomUUID(),
+      organizationId,
+      aggregateType: 'organization',
+      aggregateId: organizationId,
+      eventType: 'organization.promotion_mode.changed',
+      payload,
+    },
+  });
+}
+
+/**
  * Emit one `approval_workflow.changed` outbox event (Story 7-7, PRD §8.7).
  *
  * Mirrors `emitVisibilityRuleChanged`'s shape (specific event type so

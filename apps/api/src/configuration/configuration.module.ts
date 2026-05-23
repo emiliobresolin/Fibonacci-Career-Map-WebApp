@@ -11,6 +11,7 @@ import { ChangeImpactController } from './change-impact.controller.js';
 import { ChangeImpactService } from './change-impact.service.js';
 import { OrgSettingsController } from './org-settings.controller.js';
 import { OrgSettingsService } from './org-settings.service.js';
+import { PromotionModeController } from './promotion-mode.controller.js';
 import { LevelsController } from './levels.controller.js';
 import { LevelsRepository } from './levels.repository.js';
 import { LevelsService } from './levels.service.js';
@@ -49,6 +50,7 @@ import { RequirementsService } from './requirements.service.js';
     OrgSettingsController,
     ApprovalWorkflowController,
     ChangeImpactController,
+    PromotionModeController,
   ],
   providers: [
     CareerTracksRepository,

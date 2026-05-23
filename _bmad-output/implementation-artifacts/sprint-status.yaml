@@ -63,7 +63,7 @@ development_status:
   7-7-approval-workflow-crud-with-per-level-overrides: done
   7-8-change-impact-preview-endpoint: done
   7-9-configurationchanged-outbox-emission-on-save: done
-  7-10-rollout-mode-admin-surface-and-transition-endpoint: backlog
+  7-10-rollout-mode-admin-surface-and-transition-endpoint: done
   7-11-admin-settings-ui-for-the-full-configuration-surface: backlog
   epic-8: backlog
   8-1-evidence-entity-and-state-machine: backlog
