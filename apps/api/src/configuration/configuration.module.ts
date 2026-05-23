@@ -7,6 +7,8 @@ import { LayersController } from './layers.controller.js';
 import { LayersRepository } from './layers.repository.js';
 import { LayersService } from './layers.service.js';
 import { ApprovalWorkflowController } from './approval-workflow.controller.js';
+import { ChangeImpactController } from './change-impact.controller.js';
+import { ChangeImpactService } from './change-impact.service.js';
 import { OrgSettingsController } from './org-settings.controller.js';
 import { OrgSettingsService } from './org-settings.service.js';
 import { LevelsController } from './levels.controller.js';
@@ -46,6 +48,7 @@ import { RequirementsService } from './requirements.service.js';
     PromotionRulesController,
     OrgSettingsController,
     ApprovalWorkflowController,
+    ChangeImpactController,
   ],
   providers: [
     CareerTracksRepository,
@@ -59,6 +62,7 @@ import { RequirementsService } from './requirements.service.js';
     PromotionRulesRepository,
     PromotionRulesService,
     OrgSettingsService,
+    ChangeImpactService,
   ],
   exports: [
     CareerTracksRepository,
@@ -72,6 +76,7 @@ import { RequirementsService } from './requirements.service.js';
     PromotionRulesRepository,
     PromotionRulesService,
     OrgSettingsService,
+    ChangeImpactService,
   ],
 })
 export class ConfigurationModule {}
