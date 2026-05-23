@@ -5,8 +5,12 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 
+import { Prisma } from '@prisma/client';
+
 import { PrismaService } from '../prisma/prisma.service.js';
 import { withOrgScope } from '../prisma/rls.helpers.js';
+
+type PrismaTxClient = Prisma.TransactionClient;
 
 export type ChangeImpactEntityType =
   | 'career_track'
@@ -72,7 +76,14 @@ export class ChangeImpactService {
     const entityType = validateEntityType(input?.entityType);
     const entityId = validateUuid(input?.entityId, 'entityId');
 
-    return withOrgScope(this.prisma, organizationId, async (tx) => {
+    return withOrgScope(this.prisma, organizationId, async (tx) => this.runImpactQuery(tx, entityType, entityId));
+  }
+
+  private async runImpactQuery(
+    tx: PrismaTxClient,
+    entityType: ChangeImpactEntityType,
+    entityId: string,
+  ): Promise<ChangeImpactResult> {
       // Resolve the affected level set first (a single levelId or a
       // null-for-all-track-levels), then fan into employees. Splitting
       // resolution out makes the per-kind logic legible and lets every
@@ -132,14 +143,13 @@ export class ChangeImpactService {
         affected_employee_count: extractCount(countRows),
         sample_employee_ids: samples.map((r) => r.id),
       };
-    });
   }
 
   /** Returns the set of `level_id`s whose employees the change touches,
    *  or the sentinel `'TRACK'` for whole-track impact (the caller then
    *  filters employees by `career_track_id` instead of `level_id`). */
   private async resolveAffectedLevelIds(
-    tx: Parameters<Parameters<typeof withOrgScope>[2]>[0],
+    tx: PrismaTxClient,
     entityType: ChangeImpactEntityType,
     entityId: string,
   ): Promise<string[] | 'TRACK'> {

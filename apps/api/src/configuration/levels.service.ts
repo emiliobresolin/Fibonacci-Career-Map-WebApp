@@ -11,6 +11,7 @@ import { Prisma } from '@prisma/client';
 import type { ActorContext } from '../auth/actor-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { withOrgScope } from '../prisma/rls.helpers.js';
+import { resolveAffectedEmployeeIds } from './affected-employees.js';
 import { emitConfigurationChanged } from './audit.js';
 import { CareerTracksRepository } from './career-tracks.repository.js';
 import { LevelsRepository, type LevelRow } from './levels.repository.js';
@@ -121,12 +122,15 @@ export class LevelsService {
             active: true,
           },
         });
+        const affectedEmployeeIds = await resolveAffectedEmployeeIds(tx, 'level', row.id);
         await emitConfigurationChanged(tx, organizationId, actor, {
           configEntityType: 'level',
           entityId: row.id,
           before: null,
           after: row,
           serialize: serializeLevelRow,
+          changeType: 'CREATE',
+          affectedEmployeeIds,
         });
         return row;
       });
@@ -181,12 +185,15 @@ export class LevelsService {
           finalizedBand = { start: scoreBandStart, end: scoreBandEnd };
         }
         const after = await tx.level.update({ where: { id }, data: patch });
+        const affectedEmployeeIds = await resolveAffectedEmployeeIds(tx, 'level', after.id);
         await emitConfigurationChanged(tx, organizationId, actor, {
           configEntityType: 'level',
           entityId: after.id,
           before,
           after,
           serialize: serializeLevelRow,
+          changeType: 'UPDATE',
+          affectedEmployeeIds,
         });
         return after;
       });
@@ -225,12 +232,15 @@ export class LevelsService {
         where: { id },
         data: { active: false },
       });
+      const affectedEmployeeIds = await resolveAffectedEmployeeIds(tx, 'level', before.id);
       await emitConfigurationChanged(tx, organizationId, actor, {
         configEntityType: 'level',
         entityId: after.id,
         before,
         after,
         serialize: serializeLevelRow,
+        changeType: 'DEACTIVATE',
+        affectedEmployeeIds,
       });
       return after;
     });

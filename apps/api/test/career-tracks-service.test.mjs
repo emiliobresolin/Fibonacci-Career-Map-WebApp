@@ -73,6 +73,11 @@ function makeFake({ existingRow = null, throwOnCreate = null } = {}) {
       },
     },
     $executeRaw: async () => 0,
+    // Story 7-9: resolveAffectedEmployeeIds issues $queryRaw against
+    // the employees table. Return [] so existing tests stay focused on
+    // career-tracks behavior; 7-9 has its own dedicated tests for the
+    // chunking/payload-field behavior.
+    $queryRaw: async () => [],
   };
   const prisma = {
     $transaction: async (fn) => {

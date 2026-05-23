@@ -10,6 +10,7 @@ import { Prisma } from '@prisma/client';
 import type { ActorContext } from '../auth/actor-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { withOrgScope } from '../prisma/rls.helpers.js';
+import { resolveAffectedEmployeeIds } from './affected-employees.js';
 import { emitConfigurationChanged } from './audit.js';
 import { CareerTracksRepository, type CareerTrackRow } from './career-tracks.repository.js';
 
@@ -105,12 +106,20 @@ export class CareerTracksService {
             active: true,
           },
         });
+        // Story 7-9: CREATE on a fresh track has no employees yet
+        // (employees are assigned later via 6-2a/6-5 surfaces), so the
+        // resolver returns []. We still emit the changeType so the
+        // bulk-recalc consumer can no-op explicitly rather than
+        // implicitly skipping.
+        const affectedEmployeeIds = await resolveAffectedEmployeeIds(tx, 'career_track', row.id);
         await emitConfigurationChanged(tx, organizationId, actor, {
           configEntityType: 'career_track',
           entityId: row.id,
           before: null,
           after: row,
           serialize: serializeCareerTrackRow,
+          changeType: 'CREATE',
+          affectedEmployeeIds,
         });
         return row;
       });
@@ -152,12 +161,15 @@ export class CareerTracksService {
           throw new NotFoundException({ error: 'not_found', message: 'Unknown career track' });
         }
         const after = await tx.careerTrack.update({ where: { id }, data: patch });
+        const affectedEmployeeIds = await resolveAffectedEmployeeIds(tx, 'career_track', after.id);
         await emitConfigurationChanged(tx, organizationId, actor, {
           configEntityType: 'career_track',
           entityId: after.id,
           before,
           after,
           serialize: serializeCareerTrackRow,
+          changeType: 'UPDATE',
+          affectedEmployeeIds,
         });
         return after;
       });
@@ -194,12 +206,18 @@ export class CareerTracksService {
         where: { id },
         data: { active: false },
       });
+      // Story 7-9: resolve using the BEFORE row's id so we see the
+      // employees who were active on this track at the moment of
+      // deactivation. Bulk recalc needs to refresh their snapshots.
+      const affectedEmployeeIds = await resolveAffectedEmployeeIds(tx, 'career_track', before.id);
       await emitConfigurationChanged(tx, organizationId, actor, {
         configEntityType: 'career_track',
         entityId: after.id,
         before,
         after,
         serialize: serializeCareerTrackRow,
+        changeType: 'DEACTIVATE',
+        affectedEmployeeIds,
       });
       return after;
     });

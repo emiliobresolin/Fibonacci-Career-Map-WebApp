@@ -10,6 +10,7 @@ import { Prisma } from '@prisma/client';
 import type { ActorContext } from '../auth/actor-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { withOrgScope } from '../prisma/rls.helpers.js';
+import { resolveAffectedEmployeeIds } from './affected-employees.js';
 import { emitConfigurationChanged } from './audit.js';
 import { LayersRepository, type LayerRow } from './layers.repository.js';
 import { LevelsRepository } from './levels.repository.js';
@@ -91,12 +92,15 @@ export class LayersService {
             displayOrder,
           },
         });
+        const affectedEmployeeIds = await resolveAffectedEmployeeIds(tx, 'layer', row.id);
         await emitConfigurationChanged(tx, organizationId, actor, {
           configEntityType: 'layer',
           entityId: row.id,
           before: null,
           after: row,
           serialize: serializeLayerRow,
+          changeType: 'CREATE',
+          affectedEmployeeIds,
         });
         return row;
       });
@@ -131,12 +135,15 @@ export class LayersService {
           throw new NotFoundException({ error: 'not_found', message: 'Unknown layer' });
         }
         const after = await tx.layer.update({ where: { id }, data: patch });
+        const affectedEmployeeIds = await resolveAffectedEmployeeIds(tx, 'layer', after.id);
         await emitConfigurationChanged(tx, organizationId, actor, {
           configEntityType: 'layer',
           entityId: after.id,
           before,
           after,
           serialize: serializeLayerRow,
+          changeType: 'UPDATE',
+          affectedEmployeeIds,
         });
         return after;
       });
@@ -182,6 +189,11 @@ export class LayersService {
           level_id: before.levelId,
         });
       }
+      // Story 7-9: resolve BEFORE the delete so the JOIN to `layers`
+      // still finds the row. Once the delete runs, the layer's
+      // employees are FK-orphaned (cascade deletes requirements but
+      // not employees — employees aren't FK'd to layers directly).
+      const affectedEmployeeIds = await resolveAffectedEmployeeIds(tx, 'layer', before.id);
       await tx.layer.delete({ where: { id } });
       // Audit DELETE: `after = null` per the shared helper's contract.
       await emitConfigurationChanged(tx, organizationId, actor, {
@@ -190,6 +202,8 @@ export class LayersService {
         before,
         after: null,
         serialize: serializeLayerRow,
+        changeType: 'DELETE',
+        affectedEmployeeIds,
       });
     });
   }

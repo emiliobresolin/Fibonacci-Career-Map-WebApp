@@ -83,6 +83,9 @@ function makeFake({
       calls.rawSql.push({ sql, params });
       return 0;
     },
+    // Story 7-9: resolveAffectedEmployeeIds — layer queries JOIN
+    // employees ⨝ layers. Return [] so existing tests stay focused.
+    $queryRaw: async () => [],
   };
   const prisma = {
     $transaction: async (fn) => {

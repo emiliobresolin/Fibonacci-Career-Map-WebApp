@@ -49,6 +49,7 @@ function makeFake({ existing = null, levelExists = true, throwOnCreate = null } 
     },
     outboxEvent: { create: async (args) => { calls.outboxCreate.push(args); return args.data; } },
     $executeRaw: async () => 0,
+    $queryRaw: async () => [],  // Story 7-9: resolveAffectedEmployeeIds returns [] in unit tests.
   };
   const prisma = { $transaction: async (fn) => { calls.txCount += 1; return await fn(tx); } };
   const repo = {

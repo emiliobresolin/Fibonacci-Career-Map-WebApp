@@ -89,8 +89,13 @@ function makeFake({
       },
     },
     $executeRaw: async () => 0,
-    $queryRaw: async (...args) => {
-      calls.queryRaw.push(args);
+    $queryRaw: async (template, ...args) => {
+      calls.queryRaw.push([template, ...args]);
+      const sql = Array.isArray(template?.strings) ? template.strings.join('?') : String(template);
+      // Story 7-9: resolveAffectedEmployeeIds also issues $queryRaw.
+      // Distinguish by SQL content — the overlap-lookup query selects
+      // from "levels", the affected-employees query from "employees".
+      if (/FROM\s+employees/i.test(sql)) return [];
       return overlapPeer === null ? [] : [overlapPeer];
     },
   };

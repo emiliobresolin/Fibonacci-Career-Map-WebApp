@@ -9,6 +9,7 @@ import { EvidenceType, Prisma } from '@prisma/client';
 import type { ActorContext } from '../auth/actor-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { withOrgScope } from '../prisma/rls.helpers.js';
+import { resolveAffectedEmployeeIds } from './affected-employees.js';
 import { emitConfigurationChanged } from './audit.js';
 import { LayersRepository } from './layers.repository.js';
 import { RequirementsRepository, type RequirementRow } from './requirements.repository.js';
@@ -114,12 +115,15 @@ export class RequirementsService {
           active: true,
         },
       });
+      const affectedEmployeeIds = await resolveAffectedEmployeeIds(tx, 'requirement', row.id);
       await emitConfigurationChanged(tx, organizationId, actor, {
         configEntityType: 'requirement',
         entityId: row.id,
         before: null,
         after: row,
         serialize: serializeRequirementRow,
+        changeType: 'CREATE',
+        affectedEmployeeIds,
       });
       return row;
     });
@@ -148,12 +152,15 @@ export class RequirementsService {
         throw new NotFoundException({ error: 'not_found', message: 'Unknown requirement' });
       }
       const after = await tx.requirement.update({ where: { id }, data: patch });
+      const affectedEmployeeIds = await resolveAffectedEmployeeIds(tx, 'requirement', after.id);
       await emitConfigurationChanged(tx, organizationId, actor, {
         configEntityType: 'requirement',
         entityId: after.id,
         before,
         after,
         serialize: serializeRequirementRow,
+        changeType: 'UPDATE',
+        affectedEmployeeIds,
       });
       return after;
     });
@@ -180,12 +187,15 @@ export class RequirementsService {
         where: { id },
         data: { active: false },
       });
+      const affectedEmployeeIds = await resolveAffectedEmployeeIds(tx, 'requirement', before.id);
       await emitConfigurationChanged(tx, organizationId, actor, {
         configEntityType: 'requirement',
         entityId: after.id,
         before,
         after,
         serialize: serializeRequirementRow,
+        changeType: 'DEACTIVATE',
+        affectedEmployeeIds,
       });
       return after;
     });

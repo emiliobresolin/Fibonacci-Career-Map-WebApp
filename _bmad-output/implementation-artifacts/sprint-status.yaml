@@ -62,7 +62,7 @@ development_status:
   7-6-visibility-rules-crud: done
   7-7-approval-workflow-crud-with-per-level-overrides: done
   7-8-change-impact-preview-endpoint: done
-  7-9-configurationchanged-outbox-emission-on-save: backlog
+  7-9-configurationchanged-outbox-emission-on-save: done
   7-10-rollout-mode-admin-surface-and-transition-endpoint: backlog
   7-11-admin-settings-ui-for-the-full-configuration-surface: backlog
   epic-8: backlog

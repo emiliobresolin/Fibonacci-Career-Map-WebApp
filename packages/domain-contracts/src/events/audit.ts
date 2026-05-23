@@ -108,6 +108,12 @@ export const ScoreRecalculatedSchema = AuditBaseSchema.extend({
   }),
 });
 
+/** `change_type` carried in the `configuration.changed` payload
+ *  (Story 7-9). Drives the Epic-9 bulk-recalc consumer's strategy:
+ *  CREATE has no employees yet; UPDATE / DEACTIVATE / DELETE each
+ *  trigger different cache/snapshot rebuild policies. */
+export const ConfigChangeTypeSchema = z.enum(['CREATE', 'UPDATE', 'DEACTIVATE', 'DELETE']);
+
 export const ConfigurationChangedSchema = AuditBaseSchema.extend({
   eventType: z.literal('configuration.changed'),
   entityType: z.literal('configuration'),
@@ -121,6 +127,15 @@ export const ConfigurationChangedSchema = AuditBaseSchema.extend({
   after: z.object({
     afterValue: z.unknown(),
   }),
+  // Story 7-9: optional bulk-recalc payload. Zod's default strip mode
+  // silently drops unknown keys, which would silently lose these on
+  // the relay's parse → audit_events insert path. Declared as optional
+  // so pre-7-9 callers (none today, but defense-in-depth) still
+  // validate.
+  changeType: ConfigChangeTypeSchema.optional(),
+  affectedEmployeeIds: z.array(UuidSchema).optional(),
+  chunkIndex: z.number().int().nonnegative().optional(),
+  chunkTotal: z.number().int().positive().optional(),
 });
 
 export const PromotionInitiatedSchema = AuditBaseSchema.extend({

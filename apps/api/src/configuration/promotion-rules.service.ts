@@ -10,6 +10,7 @@ import { Prisma } from '@prisma/client';
 import type { ActorContext } from '../auth/actor-context.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { withOrgScope } from '../prisma/rls.helpers.js';
+import { resolveAffectedEmployeeIds } from './affected-employees.js';
 import { emitConfigurationChanged } from './audit.js';
 import { LevelsRepository } from './levels.repository.js';
 import {
@@ -105,12 +106,15 @@ export class PromotionRulesService {
             blockerCheck,
           },
         });
+        const affectedEmployeeIds = await resolveAffectedEmployeeIds(tx, 'promotion_rule', row.id);
         await emitConfigurationChanged(tx, organizationId, actor, {
           configEntityType: 'promotion_rule',
           entityId: row.id,
           before: null,
           after: row,
           serialize: serializePromotionRuleRow,
+          changeType: 'CREATE',
+          affectedEmployeeIds,
         });
         return row;
       });
@@ -162,12 +166,15 @@ export class PromotionRulesService {
           });
         }
         const after = await tx.promotionRule.update({ where: { id: before.id }, data: patch });
+        const affectedEmployeeIds = await resolveAffectedEmployeeIds(tx, 'promotion_rule', after.id);
         await emitConfigurationChanged(tx, organizationId, actor, {
           configEntityType: 'promotion_rule',
           entityId: after.id,
           before,
           after,
           serialize: serializePromotionRuleRow,
+          changeType: 'UPDATE',
+          affectedEmployeeIds,
         });
         return after;
       });

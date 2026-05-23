@@ -24,6 +24,18 @@ export type ConfigEntityType =
   | 'approval_workflow'
   | 'rollout_mode';
 
+/** `change_type` values carried in the `configuration.changed` payload
+ *  (Story 7-9). Lets the Epic-9 bulk-recalc consumer differentiate
+ *  delete vs. mutate so it can pick the right recalc strategy
+ *  (deactivate → also clear caches; update → just re-score). */
+export type ConfigChangeType = 'CREATE' | 'UPDATE' | 'DEACTIVATE' | 'DELETE';
+
+/** Story 7-9 AC2 — affected_employee_ids chunk size. Bulk recalc
+ *  consumer (E9.6) reads one chunk per worker invocation. Set to 500
+ *  so a 5k-employee org change fans into ~10 outbox rows (each
+ *  fitting comfortably under typical JSONB row-size budgets). */
+export const AFFECTED_EMPLOYEES_CHUNK_SIZE = 500;
+
 /**
  * Lifted from {@link import('./career-tracks.service.js').CareerTracksService}
  * and {@link import('./levels.service.js').LevelsService} as part of
@@ -42,9 +54,20 @@ export type ConfigEntityType =
  * as the row write so audit and state cannot diverge under failure.
  * The caller's `tx` is the only Prisma client this function will use.
  *
- * Story 7-9 will layer `change_type` + `affected_employee_ids[]` on
- * top of this payload for bulk-recalc triggering; that field lands
- * here as a third optional `params` field.
+ * Story 7-9 adds optional `changeType` + `affectedEmployeeIds`:
+ *   • `changeType` — CREATE / UPDATE / DEACTIVATE / DELETE tag so
+ *     Epic-9 bulk recalc can pick its strategy.
+ *   • `affectedEmployeeIds` — the active employees a configuration
+ *     change touches (resolved by `ChangeImpactService.resolveAffectedEmployeeIds`).
+ *     Chunked at AFFECTED_EMPLOYEES_CHUNK_SIZE; a single mutation
+ *     can produce N outbox rows, each carrying one chunk + a
+ *     `chunk_index` / `chunk_total` for the consumer's reassembly
+ *     (or independent dispatch, since chunks are order-independent).
+ *
+ * Backwards-compatible: omitting `changeType` + `affectedEmployeeIds`
+ * yields the pre-7-9 payload shape — the schema (`ConfigurationChangedSchema`
+ * in `@fcm/domain-contracts`) accepts both shapes because the new
+ * fields are optional.
  */
 export async function emitConfigurationChanged<TRow>(
   tx: Prisma.TransactionClient,
@@ -65,33 +88,69 @@ export async function emitConfigurationChanged<TRow>(
     /** Optional human reason (kept for parity with the audit-event
      *  schema; configuration changes generally don't carry one). */
     reason?: string | null;
+    /** Story 7-9: mutation kind for the bulk-recalc consumer. */
+    changeType?: ConfigChangeType;
+    /** Story 7-9: active employees this change touches. Chunked at
+     *  AFFECTED_EMPLOYEES_CHUNK_SIZE across multiple outbox rows. */
+    affectedEmployeeIds?: ReadonlyArray<string>;
   },
 ): Promise<void> {
-  const payload: Prisma.InputJsonValue = {
-    actorId: actor.user_id,
-    reason: params.reason ?? null,
-    before: {
-      configEntityType: params.configEntityType,
-      configEntityId: params.entityId,
-      field: '*',
-      beforeValue:
-        params.before === null ? null : (params.serialize(params.before) as Prisma.InputJsonValue),
-    },
-    after: {
-      afterValue:
-        params.after === null ? null : (params.serialize(params.after) as Prisma.InputJsonValue),
-    },
-  };
-  await tx.outboxEvent.create({
-    data: {
-      eventId: randomUUID(),
-      organizationId,
-      aggregateType: 'configuration',
-      aggregateId: params.entityId,
-      eventType: 'configuration.changed',
-      payload,
-    },
-  });
+  const chunks = chunkAffectedEmployees(params.affectedEmployeeIds);
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i]!;
+    const payload: Prisma.InputJsonValue = {
+      actorId: actor.user_id,
+      reason: params.reason ?? null,
+      before: {
+        configEntityType: params.configEntityType,
+        configEntityId: params.entityId,
+        field: '*',
+        beforeValue:
+          params.before === null ? null : (params.serialize(params.before) as Prisma.InputJsonValue),
+      },
+      after: {
+        afterValue:
+          params.after === null ? null : (params.serialize(params.after) as Prisma.InputJsonValue),
+      },
+      // Story 7-9 fields. Always present when changeType is provided,
+      // even if affectedEmployeeIds is empty — bulk-recalc consumer
+      // needs to know "no employees" vs. "field not supplied".
+      ...(params.changeType !== undefined
+        ? {
+            changeType: params.changeType,
+            affectedEmployeeIds: chunk,
+            chunkIndex: i,
+            chunkTotal: chunks.length,
+          }
+        : {}),
+    };
+    await tx.outboxEvent.create({
+      data: {
+        eventId: randomUUID(),
+        organizationId,
+        aggregateType: 'configuration',
+        aggregateId: params.entityId,
+        eventType: 'configuration.changed',
+        payload,
+      },
+    });
+  }
+}
+
+/** Split affected_employee_ids into chunks of at most
+ *  AFFECTED_EMPLOYEES_CHUNK_SIZE. Returns a single empty chunk when
+ *  no ids were supplied so the emit loop always runs exactly once
+ *  (preserving pre-7-9 "one outbox row per mutation" behavior when
+ *  the caller doesn't opt into the bulk-recalc fields). */
+function chunkAffectedEmployees(
+  ids: ReadonlyArray<string> | undefined,
+): ReadonlyArray<ReadonlyArray<string>> {
+  if (ids === undefined || ids.length === 0) return [[]];
+  const out: string[][] = [];
+  for (let i = 0; i < ids.length; i += AFFECTED_EMPLOYEES_CHUNK_SIZE) {
+    out.push(ids.slice(i, i + AFFECTED_EMPLOYEES_CHUNK_SIZE) as string[]);
+  }
+  return out;
 }
 
 /** Convenience: convert any Date fields on an object to ISO strings.
