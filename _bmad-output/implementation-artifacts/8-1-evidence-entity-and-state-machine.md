@@ -1,6 +1,6 @@
 # Story 8.1: Evidence entity and state machine
 
-Status: backlog
+Status: done
 
 ## Story
 

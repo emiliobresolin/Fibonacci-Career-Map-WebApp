@@ -85,6 +85,24 @@ enum BlockerKind {
   OTHER
 }
 
+/// Evidence lifecycle state (Story 8-1, PRD FR-4.4, Arch §6.2).
+/// Transitions are gated by the EvidenceStateMachine in
+/// `apps/api/src/evidence/evidence-state-machine.ts`. Legal transitions:
+///   • DRAFT → PENDING_APPROVAL (employee finalize, Arch §9.1)
+///   • PENDING_APPROVAL → APPROVED (manager/admin approve, PRD §6.3)
+///   • PENDING_APPROVAL → REJECTED (manager/admin reject, PRD §6.3)
+///   • APPROVED → REJECTED (retroactive rejection, FR-4.7)
+///   • APPROVED → EXPIRED (expiry cron, FR-4.8, Arch §7.5)
+/// All other transitions (including self-transitions) are illegal and
+/// throw `IllegalEvidenceTransitionError` at the domain layer.
+enum EvidenceState {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
 // ─── Models ──────────────────────────────────────────────────────────────────
 
 /// Tenant root. Every tenant-scoped table FKs back here via organization_id.
@@ -92,36 +110,37 @@ enum BlockerKind {
 /// integration is configured — bootstrap admin fallback credentials (Story E2.7)
 /// cover the auth gap until then.
 model Organization {
-  id                       String             @id @default(uuid()) @db.Uuid
-  slug                     String             @unique
-  name                     String
-  oidcConfig               Json?              @map("oidc_config")
-  visibilityDefault        VisibilityDefault  @default(OWN_ONLY) @map("visibility_default")
-  approvalWorkflowDefault  ApprovalWorkflow   @default(SINGLE) @map("approval_workflow_default")
-  promotionMode            PromotionMode      @default(CALIBRATION) @map("promotion_mode")
-  promotionModeChangedAt   DateTime?          @map("promotion_mode_changed_at") @db.Timestamptz
+  id                      String            @id @default(uuid()) @db.Uuid
+  slug                    String            @unique
+  name                    String
+  oidcConfig              Json?             @map("oidc_config")
+  visibilityDefault       VisibilityDefault @default(OWN_ONLY) @map("visibility_default")
+  approvalWorkflowDefault ApprovalWorkflow  @default(SINGLE) @map("approval_workflow_default")
+  promotionMode           PromotionMode     @default(CALIBRATION) @map("promotion_mode")
+  promotionModeChangedAt  DateTime?         @map("promotion_mode_changed_at") @db.Timestamptz
   /// Actor who flipped promotion_mode. Nullable for the initial CALIBRATION
   /// state (no actor) and references a user via UUID without a FK constraint
   /// to avoid a circular dependency: the very first user is created BEFORE
   /// they perform any rollout-mode action, but in non-bootstrap scenarios
   /// the writer (Story E7.10) sets this to a real user_id.
-  promotionModeChangedBy   String?            @map("promotion_mode_changed_by") @db.Uuid
-  createdAt                DateTime           @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt                DateTime           @updatedAt @map("updated_at") @db.Timestamptz
+  promotionModeChangedBy  String?           @map("promotion_mode_changed_by") @db.Uuid
+  createdAt               DateTime          @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt               DateTime          @updatedAt @map("updated_at") @db.Timestamptz
 
-  users                    User[]
-  roleAssignments          RoleAssignment[]
-  bootstrapCredential      BootstrapCredential?
-  recoveryCodes            RecoveryCode[]
-  recalcJobs               RecalcJob[]
-  careerTracks             CareerTrack[]
-  levels                   Level[]
-  layers                   Layer[]
-  requirements             Requirement[]
-  promotionRules           PromotionRule[]
-  employees                Employee[]
-  employeeAssignments      EmployeeAssignment[]
-  employeeBlockers         EmployeeBlocker[]
+  users               User[]
+  roleAssignments     RoleAssignment[]
+  bootstrapCredential BootstrapCredential?
+  recoveryCodes       RecoveryCode[]
+  recalcJobs          RecalcJob[]
+  careerTracks        CareerTrack[]
+  levels              Level[]
+  layers              Layer[]
+  requirements        Requirement[]
+  promotionRules      PromotionRule[]
+  employees           Employee[]
+  employeeAssignments EmployeeAssignment[]
+  employeeBlockers    EmployeeBlocker[]
+  evidence            Evidence[]
 
   @@map("organizations")
 }
@@ -139,9 +158,9 @@ model User {
   createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
   updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
-  roleAssignments  RoleAssignment[]
-  employees        Employee[]
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  roleAssignments RoleAssignment[]
+  employees       Employee[]
 
   @@unique([organizationId, email])
   @@index([organizationId])
@@ -171,21 +190,21 @@ model User {
 /// `id @id`. Lookups by `id` alone are unusual for an audit log — queries
 /// typically scan `(organization_id, occurred_at)` ranges.
 model AuditEvent {
-  id              String   @default(uuid()) @db.Uuid
-  organizationId  String   @map("organization_id") @db.Uuid
+  id             String   @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
   /// Nullable for system-actor events (cron jobs, outbox relay, GC sweeps)
   /// that have no human originator. The outbox-relay row that produced this
   /// event always carries the originating actor when one exists.
-  actorId         String?  @map("actor_id") @db.Uuid
-  eventType       String   @map("event_type")
-  entityType      String   @map("entity_type")
+  actorId        String?  @map("actor_id") @db.Uuid
+  eventType      String   @map("event_type")
+  entityType     String   @map("entity_type")
   /// Nullable so we can record events that operate on a synthetic
   /// org-scope target (e.g., bulk admin actions) without a single row id.
-  entityId        String?  @map("entity_id") @db.Uuid
-  before          Json?
-  after           Json?
-  reason          String?
-  occurredAt      DateTime @default(now()) @map("occurred_at") @db.Timestamptz
+  entityId       String?  @map("entity_id") @db.Uuid
+  before         Json?
+  after          Json?
+  reason         String?
+  occurredAt     DateTime @default(now()) @map("occurred_at") @db.Timestamptz
 
   @@id([id, occurredAt])
   @@index([organizationId, occurredAt])
@@ -209,14 +228,14 @@ model AuditEvent {
 /// table is NOT append-only — it's a transactional queue, and Story 3-6's
 /// maintenance cron archives + deletes old published rows.
 model OutboxEvent {
-  eventId         String    @id @default(uuid()) @map("event_id") @db.Uuid
-  organizationId  String    @map("organization_id") @db.Uuid
-  aggregateType   String    @map("aggregate_type")
-  aggregateId     String    @map("aggregate_id") @db.Uuid
-  eventType       String    @map("event_type")
-  payload         Json
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  publishedAt     DateTime? @map("published_at") @db.Timestamptz
+  eventId        String    @id @default(uuid()) @map("event_id") @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  aggregateType  String    @map("aggregate_type")
+  aggregateId    String    @map("aggregate_id") @db.Uuid
+  eventType      String    @map("event_type")
+  payload        Json
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  publishedAt    DateTime? @map("published_at") @db.Timestamptz
 
   @@index([publishedAt(sort: Asc), createdAt])
   @@map("outbox_events")
@@ -237,15 +256,15 @@ model OutboxEvent {
 /// IS NULL` by hand. Re-granting a previously-revoked role is therefore a
 /// fresh INSERT, not a re-activation, preserving the audit trail.
 model RoleAssignment {
-  id              String    @id @default(uuid()) @db.Uuid
-  userId          String    @map("user_id") @db.Uuid
-  organizationId  String    @map("organization_id") @db.Uuid
-  role            Role
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  deactivatedAt   DateTime? @map("deactivated_at") @db.Timestamptz
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  role           Role
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  deactivatedAt  DateTime? @map("deactivated_at") @db.Timestamptz
 
-  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   // The @@unique here is what Prisma uses to type composite-key accessors
   // (upsert / findUnique). The DB-level constraint is a PARTIAL unique index
@@ -267,15 +286,15 @@ model RoleAssignment {
 /// `passwordHash` is a scrypt-format string (see BootstrapCredentialsService);
 /// the plaintext password is surfaced ONCE at provisioning and never stored.
 model BootstrapCredential {
-  id              String    @id @default(uuid()) @db.Uuid
-  organizationId  String    @unique @map("organization_id") @db.Uuid
-  username        String
-  passwordHash    String    @map("password_hash")
-  disabledAt      DateTime? @map("disabled_at") @db.Timestamptz
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @unique @map("organization_id") @db.Uuid
+  username       String
+  passwordHash   String    @map("password_hash")
+  disabledAt     DateTime? @map("disabled_at") @db.Timestamptz
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([organizationId, username])
   @@map("bootstrap_credentials")
@@ -295,16 +314,16 @@ model BootstrapCredential {
 /// native enum so future variants (cancelled / superseded) don't
 /// require an ALTER TYPE migration.
 model RecalcJob {
-  id                   String    @id @default(uuid()) @db.Uuid
-  organizationId       String    @map("organization_id") @db.Uuid
-  employeeId           String    @map("employee_id") @db.Uuid
-  triggeringEventId    String    @map("triggering_event_id") @db.Uuid
-  status               String    @default("pending")
-  createdAt            DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  completedAt          DateTime? @map("completed_at") @db.Timestamptz
-  failureReason        String?   @map("failure_reason")
+  id                String    @id @default(uuid()) @db.Uuid
+  organizationId    String    @map("organization_id") @db.Uuid
+  employeeId        String    @map("employee_id") @db.Uuid
+  triggeringEventId String    @map("triggering_event_id") @db.Uuid
+  status            String    @default("pending")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  completedAt       DateTime? @map("completed_at") @db.Timestamptz
+  failureReason     String?   @map("failure_reason")
 
-  organization         Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@unique([employeeId, triggeringEventId])
   @@index([organizationId])
@@ -327,19 +346,19 @@ model RecalcJob {
 /// "you can't reorder mid-flight" is much higher than two visually
 /// adjacent equal-ordered rows.
 model CareerTrack {
-  id              String   @id @default(uuid()) @db.Uuid
-  organizationId  String   @map("organization_id") @db.Uuid
-  slug            String
-  name            String
-  description     String?
-  displayOrder    Int      @default(0) @map("display_order")
-  active          Boolean  @default(true)
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  slug           String
+  name           String
+  description    String?
+  displayOrder   Int      @default(0) @map("display_order")
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  levels          Level[]
-  employees       Employee[]
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  levels       Level[]
+  employees    Employee[]
 
   @@unique([organizationId, slug])
   @@index([organizationId])
@@ -362,23 +381,23 @@ model CareerTrack {
 /// and `[100, 200]` would overlap (rejected). Operators define
 /// half-open bands as `[0, 99]` and `[100, 200]` if needed.
 model Level {
-  id               String   @id @default(uuid()) @db.Uuid
-  organizationId   String   @map("organization_id") @db.Uuid
-  careerTrackId    String   @map("career_track_id") @db.Uuid
-  levelCode        String   @map("level_code")
-  name             String
-  scoreBandStart   Int      @map("score_band_start")
-  scoreBandEnd     Int      @map("score_band_end")
-  displayOrder     Int      @default(0) @map("display_order")
-  active           Boolean  @default(true)
-  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt        DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  careerTrackId  String   @map("career_track_id") @db.Uuid
+  levelCode      String   @map("level_code")
+  name           String
+  scoreBandStart Int      @map("score_band_start")
+  scoreBandEnd   Int      @map("score_band_end")
+  displayOrder   Int      @default(0) @map("display_order")
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  organization     Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  careerTrack      CareerTrack     @relation(fields: [careerTrackId], references: [id], onDelete: Cascade)
-  layers           Layer[]
-  promotionRule    PromotionRule?
-  employees        Employee[]
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  careerTrack   CareerTrack    @relation(fields: [careerTrackId], references: [id], onDelete: Cascade)
+  layers        Layer[]
+  promotionRule PromotionRule?
+  employees     Employee[]
 
   @@unique([careerTrackId, levelCode])
   @@index([organizationId])
@@ -390,17 +409,17 @@ model Level {
 /// Delivery / Influence but layer names are fully configurable per
 /// level. Unique within a level by name.
 model Layer {
-  id              String   @id @default(uuid()) @db.Uuid
-  organizationId  String   @map("organization_id") @db.Uuid
-  levelId         String   @map("level_id") @db.Uuid
-  name            String
-  displayOrder    Int      @default(0) @map("display_order")
-  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id             String   @id @default(uuid()) @db.Uuid
+  organizationId String   @map("organization_id") @db.Uuid
+  levelId        String   @map("level_id") @db.Uuid
+  name           String
+  displayOrder   Int      @default(0) @map("display_order")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  level           Level        @relation(fields: [levelId], references: [id], onDelete: Cascade)
-  requirements    Requirement[]
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  level        Level         @relation(fields: [levelId], references: [id], onDelete: Cascade)
+  requirements Requirement[]
 
   @@unique([levelId, name])
   @@index([organizationId])
@@ -413,21 +432,22 @@ model Layer {
 /// Readiness; `expiryMonths` is nullable — null means evidence for
 /// this requirement does not expire.
 model Requirement {
-  id              String       @id @default(uuid()) @db.Uuid
-  organizationId  String       @map("organization_id") @db.Uuid
-  layerId         String       @map("layer_id") @db.Uuid
-  name            String
-  description     String?
-  evidenceType    EvidenceType @map("evidence_type")
-  weight          Int
-  mandatory       Boolean      @default(false)
-  expiryMonths    Int?         @map("expiry_months")
-  active          Boolean      @default(true)
-  createdAt       DateTime     @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime     @updatedAt @map("updated_at") @db.Timestamptz
+  id             String       @id @default(uuid()) @db.Uuid
+  organizationId String       @map("organization_id") @db.Uuid
+  layerId        String       @map("layer_id") @db.Uuid
+  name           String
+  description    String?
+  evidenceType   EvidenceType @map("evidence_type")
+  weight         Int
+  mandatory      Boolean      @default(false)
+  expiryMonths   Int?         @map("expiry_months")
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime     @updatedAt @map("updated_at") @db.Timestamptz
 
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  layer           Layer        @relation(fields: [layerId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  layer        Layer        @relation(fields: [layerId], references: [id], onDelete: Cascade)
+  evidence     Evidence[]
 
   @@index([organizationId])
   @@index([layerId])
@@ -445,20 +465,20 @@ model Requirement {
 /// disable the blocker check for early-career levels where blockers
 /// are extremely rare.
 model PromotionRule {
-  id                       String   @id @default(uuid()) @db.Uuid
-  organizationId           String   @map("organization_id") @db.Uuid
-  levelId                  String   @unique @map("level_id") @db.Uuid
-  minScore                 Int      @map("min_score")
-  minTimeAtLevelMonths     Int?     @map("min_time_at_level_months")
-  mandatoryCompletion      Boolean  @default(true) @map("mandatory_completion")
-  managerRequired          Boolean  @default(true) @map("manager_required")
-  hrRequired               Boolean  @default(false) @map("hr_required")
-  blockerCheck             Boolean  @default(true) @map("blocker_check")
-  createdAt                DateTime @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt                DateTime @updatedAt @map("updated_at") @db.Timestamptz
+  id                   String   @id @default(uuid()) @db.Uuid
+  organizationId       String   @map("organization_id") @db.Uuid
+  levelId              String   @unique @map("level_id") @db.Uuid
+  minScore             Int      @map("min_score")
+  minTimeAtLevelMonths Int?     @map("min_time_at_level_months")
+  mandatoryCompletion  Boolean  @default(true) @map("mandatory_completion")
+  managerRequired      Boolean  @default(true) @map("manager_required")
+  hrRequired           Boolean  @default(false) @map("hr_required")
+  blockerCheck         Boolean  @default(true) @map("blocker_check")
+  createdAt            DateTime @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt            DateTime @updatedAt @map("updated_at") @db.Timestamptz
 
-  organization             Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  level                    Level        @relation(fields: [levelId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  level        Level        @relation(fields: [levelId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@map("promotion_rules")
@@ -471,14 +491,14 @@ model PromotionRule {
 /// self-burns on redemption — `redeemedAt` + `redeemedByUserId` are set
 /// and the row is permanently unusable.
 model RecoveryCode {
-  id                String    @id @default(uuid()) @db.Uuid
-  organizationId    String    @map("organization_id") @db.Uuid
-  codeHash          String    @map("code_hash")
-  redeemedAt        DateTime? @map("redeemed_at") @db.Timestamptz
-  redeemedByUserId  String?   @map("redeemed_by_user_id") @db.Uuid
-  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  id               String    @id @default(uuid()) @db.Uuid
+  organizationId   String    @map("organization_id") @db.Uuid
+  codeHash         String    @map("code_hash")
+  redeemedAt       DateTime? @map("redeemed_at") @db.Timestamptz
+  redeemedByUserId String?   @map("redeemed_by_user_id") @db.Uuid
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz
 
-  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@map("recovery_codes")
@@ -507,23 +527,24 @@ model RecoveryCode {
 /// promotion_records, score_snapshots) but is excluded from active
 /// employee surfaces by the repository's default queries.
 model Employee {
-  id              String    @id @default(uuid()) @db.Uuid
-  organizationId  String    @map("organization_id") @db.Uuid
-  userId          String    @map("user_id") @db.Uuid
-  careerTrackId   String?   @map("career_track_id") @db.Uuid
-  levelId         String?   @map("level_id") @db.Uuid
-  assignedAt      DateTime? @map("assigned_at") @db.Timestamptz
-  deactivatedAt   DateTime? @map("deactivated_at") @db.Timestamptz
-  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  id             String    @id @default(uuid()) @db.Uuid
+  organizationId String    @map("organization_id") @db.Uuid
+  userId         String    @map("user_id") @db.Uuid
+  careerTrackId  String?   @map("career_track_id") @db.Uuid
+  levelId        String?   @map("level_id") @db.Uuid
+  assignedAt     DateTime? @map("assigned_at") @db.Timestamptz
+  deactivatedAt  DateTime? @map("deactivated_at") @db.Timestamptz
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  user            User         @relation(fields: [userId], references: [id], onDelete: Cascade)
-  careerTrack     CareerTrack? @relation(fields: [careerTrackId], references: [id], onDelete: Restrict)
-  level           Level?       @relation(fields: [levelId], references: [id], onDelete: Restrict)
-  assignments     EmployeeAssignment[] @relation("AssignmentEmployee")
+  organization       Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user               User                 @relation(fields: [userId], references: [id], onDelete: Cascade)
+  careerTrack        CareerTrack?         @relation(fields: [careerTrackId], references: [id], onDelete: Restrict)
+  level              Level?               @relation(fields: [levelId], references: [id], onDelete: Restrict)
+  assignments        EmployeeAssignment[] @relation("AssignmentEmployee")
   managedAssignments EmployeeAssignment[] @relation("AssignmentManager")
-  blockers        EmployeeBlocker[]
+  blockers           EmployeeBlocker[]
+  evidence           Evidence[]
 
   @@unique([organizationId, userId])
   @@index([organizationId])
@@ -550,19 +571,19 @@ model Employee {
 /// table is per-user for RBAC. `employee_assignments` is per-employee
 /// for org-structure (manager hierarchy, role within team).
 model EmployeeAssignment {
-  id                    String    @id @default(uuid()) @db.Uuid
-  employeeId            String    @map("employee_id") @db.Uuid
-  organizationId        String    @map("organization_id") @db.Uuid
-  role                  Role
-  managerEmployeeId     String?   @map("manager_employee_id") @db.Uuid
-  assignedAt            DateTime  @default(now()) @map("assigned_at") @db.Timestamptz
-  deactivatedAt         DateTime? @map("deactivated_at") @db.Timestamptz
-  createdAt             DateTime  @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt             DateTime  @updatedAt @map("updated_at") @db.Timestamptz
+  id                String    @id @default(uuid()) @db.Uuid
+  employeeId        String    @map("employee_id") @db.Uuid
+  organizationId    String    @map("organization_id") @db.Uuid
+  role              Role
+  managerEmployeeId String?   @map("manager_employee_id") @db.Uuid
+  assignedAt        DateTime  @default(now()) @map("assigned_at") @db.Timestamptz
+  deactivatedAt     DateTime? @map("deactivated_at") @db.Timestamptz
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz
 
-  employee              Employee     @relation("AssignmentEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
-  organization          Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  manager               Employee?    @relation("AssignmentManager", fields: [managerEmployeeId], references: [id], onDelete: SetNull)
+  employee     Employee     @relation("AssignmentEmployee", fields: [employeeId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  manager      Employee?    @relation("AssignmentManager", fields: [managerEmployeeId], references: [id], onDelete: SetNull)
 
   // The @@unique here is what Prisma uses to type composite-key accessors.
   // The DB-level constraint is a PARTIAL unique index on (employee_id,
@@ -595,25 +616,95 @@ model EmployeeAssignment {
 /// it. Both reference `users` (NOT employees) because the actor is
 /// an authenticated user, which may or may not also be an employee.
 model EmployeeBlocker {
-  id              String      @id @default(uuid()) @db.Uuid
-  organizationId  String      @map("organization_id") @db.Uuid
-  employeeId      String      @map("employee_id") @db.Uuid
-  kind            BlockerKind
-  reason          String
-  openedAt        DateTime    @default(now()) @map("opened_at") @db.Timestamptz
-  resolvedAt      DateTime?   @map("resolved_at") @db.Timestamptz
-  openedBy        String      @map("opened_by") @db.Uuid
-  resolvedBy      String?     @map("resolved_by") @db.Uuid
+  id             String      @id @default(uuid()) @db.Uuid
+  organizationId String      @map("organization_id") @db.Uuid
+  employeeId     String      @map("employee_id") @db.Uuid
+  kind           BlockerKind
+  reason         String
+  openedAt       DateTime    @default(now()) @map("opened_at") @db.Timestamptz
+  resolvedAt     DateTime?   @map("resolved_at") @db.Timestamptz
+  openedBy       String      @map("opened_by") @db.Uuid
+  resolvedBy     String?     @map("resolved_by") @db.Uuid
   /// Optional free-text recorded at resolve time. Audited verbatim
   /// when the blocker is resolved.
-  resolutionNote  String?     @map("resolution_note")
-  createdAt       DateTime    @default(now()) @map("created_at") @db.Timestamptz
-  updatedAt       DateTime    @updatedAt @map("updated_at") @db.Timestamptz
+  resolutionNote String?     @map("resolution_note")
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz
 
-  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  employee        Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
   @@index([employeeId])
   @@map("employee_blockers")
+}
+
+// ─── Evidence domain (Story 8-1) ─────────────────────────────────────────────
+
+/// Evidence row (Story 8-1, Arch §6.2, PRD FR-4.4). One row per artifact
+/// an employee submits against a requirement.
+///
+/// Lifecycle (see EvidenceState enum + EvidenceStateMachine in
+/// `apps/api/src/evidence/evidence-state-machine.ts`):
+///   DRAFT → PENDING_APPROVAL → APPROVED / REJECTED → EXPIRED
+/// Illegal transitions throw `IllegalEvidenceTransitionError` at the
+/// domain layer; the DB doesn't enforce the transition graph (would
+/// require a stateful trigger that re-reads OLD/NEW per UPDATE — the
+/// state-machine module is the canonical guard).
+///
+/// Payload split (PRD §8.4):
+///   • FILE submissions write bytes to S3 and store the key in
+///     `storageObjectKey`; `payload` stays null.
+///   • TEXT / URL / STRUCTURED submissions store the content directly
+///     in `payload` JSONB; `storageObjectKey` stays null.
+/// Both columns are individually nullable because a DRAFT row may
+/// carry neither yet (the employee hasn't finalized). The "exactly
+/// one set on a PENDING_APPROVAL row" invariant is enforced by the
+/// finalize service (Story 8-2), not the DB.
+///
+/// Timestamps:
+///   • `submittedAt` set when DRAFT → PENDING_APPROVAL fires.
+///   • `approvedAt` set when PENDING_APPROVAL → APPROVED fires and
+///     PRESERVED across APPROVED → REJECTED (retroactive, FR-4.7) and
+///     APPROVED → EXPIRED (FR-4.8). The audit-read surface relies on
+///     this to render "approved on …" for historical reconstruction.
+///   • `expiresAt` is approvedAt + requirement.expiryMonths; null
+///     when the requirement has no expiry. The expiry-scan cron
+///     (Story 8-7) filters on `state = APPROVED AND expires_at < NOW()`.
+///
+/// FK posture:
+///   • organization → CASCADE (tenant delete wipes evidence).
+///   • employee → CASCADE (matches tenant-purge path; production
+///     uses soft-deactivation).
+///   • requirement → RESTRICT (operator deactivates the requirement
+///     instead; hard delete only proceeds after manual evidence
+///     cleanup, preserving the audit trail).
+model Evidence {
+  id               String        @id @default(uuid()) @db.Uuid
+  organizationId   String        @map("organization_id") @db.Uuid
+  employeeId       String        @map("employee_id") @db.Uuid
+  requirementId    String        @map("requirement_id") @db.Uuid
+  state            EvidenceState @default(DRAFT)
+  /// Inline JSONB payload for TEXT / URL / STRUCTURED evidence types.
+  /// Null for FILE-type submissions and for DRAFT rows that haven't
+  /// been populated yet.
+  payload          Json?
+  /// S3 object key for FILE-type evidence. Null for TEXT / URL /
+  /// STRUCTURED and for un-uploaded DRAFTs. Pre-signed upload + finalize
+  /// flow lands in Story 8-2.
+  storageObjectKey String?       @map("storage_object_key")
+  submittedAt      DateTime?     @map("submitted_at") @db.Timestamptz
+  approvedAt       DateTime?     @map("approved_at") @db.Timestamptz
+  expiresAt        DateTime?     @map("expires_at") @db.Timestamptz
+  createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz
+  updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  requirement  Requirement  @relation(fields: [requirementId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([employeeId, state])
+  @@index([requirementId])
+  @@map("evidence")
 }

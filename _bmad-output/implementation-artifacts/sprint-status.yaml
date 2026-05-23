@@ -3,7 +3,7 @@
 # Source of truth for story lifecycle state.
 # Statuses: backlog, ready-for-dev, in-progress, code-review, done
 
-last_updated: 2026-05-22
+last_updated: 2026-05-23
 
 development_status:
   epic-1: done
@@ -65,8 +65,8 @@ development_status:
   7-9-configurationchanged-outbox-emission-on-save: done
   7-10-rollout-mode-admin-surface-and-transition-endpoint: done
   7-11-admin-settings-ui-for-the-full-configuration-surface: done
-  epic-8: backlog
-  8-1-evidence-entity-and-state-machine: backlog
+  epic-8: in-progress
+  8-1-evidence-entity-and-state-machine: done
   8-2-pre-signed-s3-upload-slot-finalize-flow: backlog
   8-3-pre-signed-retrieval-with-rbac-visibility-checks: backlog
   8-4-approve-reject-with-mandatory-reasons-and-approvalrecord: backlog
