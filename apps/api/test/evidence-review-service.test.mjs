@@ -23,6 +23,8 @@ const managerActor = {
 const APPROVE_REASON = 'Validated against the requirement criteria — approved.';
 const REJECT_REASON = 'Insufficient detail in the supplied write-up; please add scope + impact.';
 
+const MGR_EMP = 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee';
+
 function makePrisma({
   row = {
     state: 'PENDING_APPROVAL',
@@ -30,6 +32,12 @@ function makePrisma({
     owner_user_id: OWNER_USER,
     expiry_months: null,
   },
+  // Story 8-5 — defaults grant the actor MANAGER access (employee
+  // row exists, subject's assignment lists the actor as direct
+  // manager). Tests that need to assert the authz failure path
+  // override these explicitly.
+  actorEmployee = { id: MGR_EMP },
+  subjectAssignments = [{ managerEmployeeId: MGR_EMP, deactivatedAt: null }],
 } = {}) {
   const calls = {
     tx: 0,
@@ -67,6 +75,12 @@ function makePrisma({
           expiresAt: data.expiresAt ?? null,
         };
       },
+    },
+    employee: {
+      findFirst: async () => actorEmployee,
+    },
+    employeeAssignment: {
+      findMany: async () => subjectAssignments,
     },
     approvalRecord: {
       create: async ({ data }) => {

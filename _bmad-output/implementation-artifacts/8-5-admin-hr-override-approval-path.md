@@ -1,6 +1,14 @@
 # Story 8.5: Admin/HR override approval path
 
-Status: backlog
+Status: done
+
+> AC2 implementation note: `actorRole` is persisted INSIDE the
+> `evidence.approved` / `evidence.rejected` payload's `after`
+> JSONB column — NOT at the payload top level. The outbox-relay
+> (Story 3-3) only writes the schema's `before` / `after` blocks
+> into audit_events; a top-level field would be validated by the
+> schema but dropped at persistence. HR audit-reads must query
+> `audit_events.after->>'actorRole'`.
 
 ## Story
 

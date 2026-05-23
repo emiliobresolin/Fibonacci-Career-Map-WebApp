@@ -113,6 +113,12 @@ export async function emitEvidenceApproved(
     },
     after: {
       afterScore: 0,
+      // Story 8-5 AC2: capture the actor's role so HR investigations
+      // can distinguish MANAGER from ADMIN-override approvals. MUST
+      // live INSIDE `after` because the outbox-relay only persists
+      // `before` / `after` JSONB to audit_events — a top-level field
+      // would be validated and then dropped at the relay boundary.
+      actorRole: actor.role,
     },
   };
   await tx.outboxEvent.create({
@@ -154,6 +160,10 @@ export async function emitEvidenceRejected(
     after: {
       evidenceId: params.evidenceId,
       employeeId: params.employeeId,
+      // Story 8-5 AC2: actorRole lives inside `after` so the
+      // outbox-relay actually persists it (audit_events has no
+      // top-level actor_role column).
+      actorRole: actor.role,
     },
   };
   await tx.outboxEvent.create({

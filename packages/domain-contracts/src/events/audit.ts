@@ -79,6 +79,14 @@ export const EvidenceApprovedSchema = AuditBaseSchema.extend({
   }),
   after: z.object({
     afterScore: z.number(),
+    // Story 8-5 AC2: the actor's role is captured so HR investigations
+    // can distinguish MANAGER decisions from ADMIN-override decisions.
+    // MUST live INSIDE `after` (not at the top level) because the
+    // outbox-relay only persists the structural columns + `before` /
+    // `after` JSONB into audit_events — a top-level field would be
+    // validated but dropped before reaching the persisted row.
+    // Optional for backward compat with pre-8-5 emit shapes.
+    actorRole: RoleSchema.optional(),
   }),
 });
 
@@ -91,6 +99,9 @@ export const EvidenceRejectedSchema = AuditBaseSchema.extend({
   after: z.object({
     evidenceId: UuidSchema,
     employeeId: UuidSchema,
+    // Story 8-5 AC2: same actorRole capture as evidence.approved,
+    // inside `after` so the relay actually persists it.
+    actorRole: RoleSchema.optional(),
   }),
 });
 

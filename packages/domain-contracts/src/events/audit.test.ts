@@ -44,14 +44,15 @@ const SAMPLES: Record<string, AuditEvent> = {
     entityType: 'evidence',
     reason: 'Looks good',
     before: { evidenceId: UUID_D, employeeId: UUID_E, beforeScore: 100 },
-    after: { afterScore: 120 },
+    // Story 8-5: actorRole nested in `after` so the relay persists it.
+    after: { afterScore: 120, actorRole: 'MANAGER' },
   }) as AuditEvent,
   'evidence.rejected': base({
     eventType: 'evidence.rejected',
     entityType: 'evidence',
     reason: 'Insufficient detail',
     before: null,
-    after: { evidenceId: UUID_D, employeeId: UUID_E },
+    after: { evidenceId: UUID_D, employeeId: UUID_E, actorRole: 'ADMIN' },
   }) as AuditEvent,
   'evidence.retrieved': base({
     eventType: 'evidence.retrieved',

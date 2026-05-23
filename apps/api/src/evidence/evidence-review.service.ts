@@ -23,6 +23,7 @@ import {
 import { PrismaService } from '../prisma/prisma.service.js';
 import { withOrgScope } from '../prisma/rls.helpers.js';
 import { emitEvidenceApproved, emitEvidenceRejected } from './audit.js';
+import { authorizeEvidenceReview } from './evidence-authz.js';
 import {
   EvidenceStateMachine,
   IllegalEvidenceTransitionError,
@@ -133,6 +134,15 @@ export class EvidenceReviewService {
         throw err;
       }
 
+      // Story 8-5 — DIRECT_MANAGER or ADMIN_OVERRIDE check. Self-
+      // approval guard above already rejected owner-acting-on-own;
+      // this pass refuses MANAGERs trying to review evidence from
+      // outside their team. ADMIN bypasses via the override path.
+      // The returned `via` is logged after the tx commits so
+      // forensics readers can correlate the decision path with the
+      // audit row.
+      const reviewVia = await this.assertReviewAuthorized(tx, actor, row.employeeId);
+
       try {
         EvidenceStateMachine.assertCanTransition(
           row.state as 'PENDING_APPROVAL',
@@ -189,8 +199,13 @@ export class EvidenceReviewService {
         approvedAt,
         expiresAt,
         employeeId: updated.employeeId,
+        reviewVia,
       };
     });
+
+    this.logger.log(
+      `evidence ${id} APPROVED via=${result.reviewVia} actor=${actor.user_id} approvalRecord=${result.approvalRecordId}`,
+    );
 
     // Enqueue recalc OUTSIDE the tx. BullMQ + Postgres are two systems;
     // the audit row + state are durable, so a missed enqueue here is
@@ -241,6 +256,15 @@ export class EvidenceReviewService {
         }
         throw err;
       }
+
+      // Story 8-5 — DIRECT_MANAGER or ADMIN_OVERRIDE check. Self-
+      // approval guard above already rejected owner-acting-on-own;
+      // this pass refuses MANAGERs trying to review evidence from
+      // outside their team. ADMIN bypasses via the override path.
+      // The returned `via` is logged after the tx commits so
+      // forensics readers can correlate the decision path with the
+      // audit row.
+      const reviewVia = await this.assertReviewAuthorized(tx, actor, row.employeeId);
 
       // Story 8-4 handles the PENDING_APPROVAL → REJECTED transition
       // only. APPROVED → REJECTED is legal in the state machine
@@ -314,6 +338,10 @@ export class EvidenceReviewService {
         reason,
       });
 
+      this.logger.log(
+        `evidence ${id} REJECTED via=${reviewVia} actor=${actor.user_id} approvalRecord=${approvalRecord.id}`,
+      );
+
       return {
         evidenceId: id,
         state: 'REJECTED' as const,
@@ -324,6 +352,66 @@ export class EvidenceReviewService {
   }
 
   // ── helpers ─────────────────────────────────────────────────────
+
+  /**
+   * Story 8-5 — assert the actor is allowed to review (approve/reject)
+   * the subject's evidence. Loads the actor's employee row in this
+   * org + the subject's active assignments, then runs
+   * {@link authorizeEvidenceReview}. Throws 403 with the structured
+   * error code on denial.
+   *
+   * Runs INSIDE the same withOrgScope tx so the lookups are RLS-
+   * scoped to the actor's organization (defense in depth, even
+   * though `actor.organization_id` is also enforced by withOrgScope
+   * itself).
+   */
+  private async assertReviewAuthorized(
+    tx: Prisma.TransactionClient,
+    actor: ActorContext,
+    subjectEmployeeId: string,
+  ): Promise<'DIRECT_MANAGER' | 'ADMIN_OVERRIDE'> {
+    // ADMIN short-circuits — no need to load employee rows.
+    if (actor.role === 'ADMIN') {
+      return 'ADMIN_OVERRIDE';
+    }
+    // Parallel loads — the actor's employee row and the subject's
+    // active assignments are independent reads. Running sequentially
+    // (await + await) holds the SELECT FOR UPDATE row lock longer
+    // than necessary under contention.
+    const [actorEmployee, subjectAssignments] = await Promise.all([
+      tx.employee.findFirst({
+        where: {
+          userId: actor.user_id,
+          organizationId: actor.organization_id,
+          deactivatedAt: null,
+        },
+        select: { id: true },
+      }),
+      tx.employeeAssignment.findMany({
+        where: {
+          employeeId: subjectEmployeeId,
+          // Defense-in-depth org_id predicate mirrors actor-employee
+          // query; RLS already scopes via withOrgScope, but a belt-
+          // and-braces predicate dodges a future RLS regression.
+          organizationId: actor.organization_id,
+          deactivatedAt: null,
+        },
+        select: { managerEmployeeId: true, deactivatedAt: true },
+      }),
+    ]);
+    const authz = authorizeEvidenceReview({
+      actor: { role: actor.role },
+      actorEmployee,
+      subjectAssignments,
+    });
+    if (!authz.allowed) {
+      throw new ForbiddenException({
+        error: 'forbidden',
+        message: authz.reason,
+      });
+    }
+    return authz.via;
+  }
 
   /** Lock the evidence row + resolve the owner User.id. Used by both
    *  approve and reject so the self-approval guard has the actor's
