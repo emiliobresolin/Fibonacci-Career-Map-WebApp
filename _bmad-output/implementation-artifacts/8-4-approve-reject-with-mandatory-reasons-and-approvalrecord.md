@@ -1,6 +1,6 @@
 # Story 8.4: Approve/Reject with mandatory reasons and ApprovalRecord
 
-Status: backlog
+Status: done
 
 ## Story
 

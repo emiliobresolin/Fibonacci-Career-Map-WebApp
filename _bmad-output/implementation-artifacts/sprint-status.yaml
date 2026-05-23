@@ -69,7 +69,7 @@ development_status:
   8-1-evidence-entity-and-state-machine: done
   8-2-pre-signed-s3-upload-slot-finalize-flow: done
   8-3-pre-signed-retrieval-with-rbac-visibility-checks: done
-  8-4-approve-reject-with-mandatory-reasons-and-approvalrecord: backlog
+  8-4-approve-reject-with-mandatory-reasons-and-approvalrecord: done
   8-5-admin-hr-override-approval-path: backlog
   8-6-retroactive-rejection-of-approved-evidence: backlog
   8-7-evidence-expiry-cron-consumer: backlog

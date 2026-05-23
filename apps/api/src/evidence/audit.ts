@@ -76,6 +76,99 @@ export async function emitEvidenceRetrieved(
   return { eventId };
 }
 
+/**
+ * Emit one `evidence.approved` outbox event (Story 8-4 AC5).
+ *
+ * Schema (EvidenceApprovedSchema in @fcm/domain-contracts):
+ *   reason: z.string().min(1)   — PRD §10.1 requires a reason
+ *   before: { evidenceId, employeeId, beforeScore }
+ *   after:  { afterScore }
+ *
+ * `beforeScore` / `afterScore` carry 0 placeholders for Epic 8 — real
+ * scoring lands in Epic 9 (the bulk-recalc consumer picks up the
+ * audit row via `originatingEventId` and produces a real
+ * `score.recalculated` snapshot delta). Emitting 0s today keeps the
+ * audit-event taxonomy stable; Epic 9 will tighten the values.
+ */
+export async function emitEvidenceApproved(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  actor: ActorContext,
+  params: {
+    evidenceId: string;
+    employeeId: string;
+    reason: string;
+  },
+): Promise<{ eventId: string }> {
+  const eventId = randomUUID();
+  const payload: Prisma.InputJsonValue = {
+    actorId: actor.user_id,
+    reason: params.reason,
+    before: {
+      evidenceId: params.evidenceId,
+      employeeId: params.employeeId,
+      // Epic-9 will replace these with real values from the
+      // pre-mutation score snapshot. Story 8-4 ships placeholders.
+      beforeScore: 0,
+    },
+    after: {
+      afterScore: 0,
+    },
+  };
+  await tx.outboxEvent.create({
+    data: {
+      eventId,
+      organizationId,
+      aggregateType: 'evidence',
+      aggregateId: params.evidenceId,
+      eventType: 'evidence.approved',
+      payload,
+    },
+  });
+  return { eventId };
+}
+
+/**
+ * Emit one `evidence.rejected` outbox event (Story 8-4 AC5).
+ *
+ * Schema (EvidenceRejectedSchema):
+ *   reason: z.string().min(1)   — PRD §10.1 requires a reason
+ *   before: null
+ *   after: { evidenceId, employeeId }
+ */
+export async function emitEvidenceRejected(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  actor: ActorContext,
+  params: {
+    evidenceId: string;
+    employeeId: string;
+    reason: string;
+  },
+): Promise<{ eventId: string }> {
+  const eventId = randomUUID();
+  const payload: Prisma.InputJsonValue = {
+    actorId: actor.user_id,
+    reason: params.reason,
+    before: null,
+    after: {
+      evidenceId: params.evidenceId,
+      employeeId: params.employeeId,
+    },
+  };
+  await tx.outboxEvent.create({
+    data: {
+      eventId,
+      organizationId,
+      aggregateType: 'evidence',
+      aggregateId: params.evidenceId,
+      eventType: 'evidence.rejected',
+      payload,
+    },
+  });
+  return { eventId };
+}
+
 export async function emitEvidenceSubmitted(
   tx: Prisma.TransactionClient,
   organizationId: string,

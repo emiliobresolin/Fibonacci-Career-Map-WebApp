@@ -85,6 +85,14 @@ enum BlockerKind {
   OTHER
 }
 
+/// Approval decision (Story 8-4, PRD FR-4.5 / FR-4.6 / §6.3). One row
+/// per approve/reject decision against either an evidence row (Stories
+/// 8-4 / 8-5 / 8-6) OR a promotion record (Epic 13).
+enum ApprovalDecision {
+  APPROVED
+  REJECTED
+}
+
 /// Evidence lifecycle state (Story 8-1, PRD FR-4.4, Arch §6.2).
 /// Transitions are gated by the EvidenceStateMachine in
 /// `apps/api/src/evidence/evidence-state-machine.ts`. Legal transitions:
@@ -141,6 +149,7 @@ model Organization {
   employeeAssignments EmployeeAssignment[]
   employeeBlockers    EmployeeBlocker[]
   evidence            Evidence[]
+  approvalRecords     ApprovalRecord[]
 
   @@map("organizations")
 }
@@ -161,6 +170,7 @@ model User {
   organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Restrict)
   roleAssignments RoleAssignment[]
   employees       Employee[]
+  approvalRecords ApprovalRecord[]
 
   @@unique([organizationId, email])
   @@index([organizationId])
@@ -711,12 +721,57 @@ model Evidence {
   createdAt        DateTime      @default(now()) @map("created_at") @db.Timestamptz
   updatedAt        DateTime      @updatedAt @map("updated_at") @db.Timestamptz
 
-  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  employee     Employee     @relation(fields: [employeeId], references: [id], onDelete: Cascade)
-  requirement  Requirement  @relation(fields: [requirementId], references: [id], onDelete: Restrict)
+  organization    Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  employee        Employee         @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  requirement     Requirement      @relation(fields: [requirementId], references: [id], onDelete: Restrict)
+  approvalRecords ApprovalRecord[]
 
   @@index([organizationId])
   @@index([employeeId, state])
   @@index([requirementId])
   @@map("evidence")
+}
+
+/// Approval record (Story 8-4, Arch §6.2, PRD FR-4.5 / FR-4.6 / §6.3).
+///
+/// One row per approve/reject decision. Each row references EXACTLY ONE
+/// parent — either an evidence row (Stories 8-4 / 8-5 / 8-6) or a
+/// promotion record (Epic 13, not yet shipped). The exclusive XOR is
+/// enforced by a CHECK constraint at the DB layer (see migration);
+/// the unrelaxed Prisma type modeling allows both relations to be
+/// nullable so a row populates the one it cares about.
+///
+/// `promotionRecordId` carries NO FK in the migration — the parent
+/// table lands in Epic 13. A 13-X migration will add the FK
+/// constraint.
+///
+/// Append-only at the DB-role level + BEFORE UPDATE/DELETE trigger
+/// (defense in depth). Prisma's `update`/`delete` against this model
+/// will raise at runtime; do not use them.
+model ApprovalRecord {
+  id                String           @id @default(uuid()) @db.Uuid
+  organizationId    String           @map("organization_id") @db.Uuid
+  /// One of evidenceId / promotionRecordId is non-null; the other is
+  /// null. Enforced at the DB layer.
+  evidenceId        String?          @map("evidence_id") @db.Uuid
+  /// Reserved for Epic 13. NO FK constraint in the migration today.
+  promotionRecordId String?          @map("promotion_record_id") @db.Uuid
+  actorId           String           @map("actor_id") @db.Uuid
+  decision          ApprovalDecision
+  /// ≥10 chars for APPROVED, ≥20 for REJECTED — enforced at the DB
+  /// layer via a CHECK constraint.
+  reason            String
+  decidedAt         DateTime         @default(now()) @map("decided_at") @db.Timestamptz
+  createdAt         DateTime         @default(now()) @map("created_at") @db.Timestamptz
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  evidence     Evidence?    @relation(fields: [evidenceId], references: [id], onDelete: Cascade)
+  actor        User         @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([organizationId])
+  @@index([organizationId, decidedAt])
+  @@index([actorId, decidedAt])
+  @@index([evidenceId, decidedAt])
+  @@index([promotionRecordId, decidedAt])
+  @@map("approval_records")
 }
