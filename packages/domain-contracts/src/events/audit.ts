@@ -94,6 +94,24 @@ export const EvidenceRejectedSchema = AuditBaseSchema.extend({
   }),
 });
 
+/** Story 8-3 — every successful presigned-GET issuance lands one
+ *  `evidence.retrieved` row. Carries the actor (who got the URL) +
+ *  the subject (whose evidence) + the requirement. Useful for the
+ *  audit-read API to answer "who has seen this evidence?". This is a
+ *  read-side event so `after: null` mirrors the session.revoked
+ *  shape; the audit-row context lives in `before`. */
+export const EvidenceRetrievedSchema = AuditBaseSchema.extend({
+  eventType: z.literal('evidence.retrieved'),
+  entityType: z.literal('evidence'),
+  reason: z.string().nullable(),
+  before: z.object({
+    evidenceId: UuidSchema,
+    employeeId: UuidSchema,
+    requirementId: UuidSchema,
+  }),
+  after: z.null(),
+});
+
 export const ScoreRecalculatedSchema = AuditBaseSchema.extend({
   eventType: z.literal('score.recalculated'),
   entityType: z.literal('score_snapshot'),
@@ -406,6 +424,7 @@ export const AuditEventSchema = z.discriminatedUnion('eventType', [
   EvidenceSubmittedSchema,
   EvidenceApprovedSchema,
   EvidenceRejectedSchema,
+  EvidenceRetrievedSchema,
   ScoreRecalculatedSchema,
   ConfigurationChangedSchema,
   PromotionInitiatedSchema,
@@ -432,6 +451,7 @@ export type AuditEventType = AuditEvent['eventType'];
 export type EvidenceSubmitted = z.infer<typeof EvidenceSubmittedSchema>;
 export type EvidenceApproved = z.infer<typeof EvidenceApprovedSchema>;
 export type EvidenceRejected = z.infer<typeof EvidenceRejectedSchema>;
+export type EvidenceRetrieved = z.infer<typeof EvidenceRetrievedSchema>;
 export type ScoreRecalculated = z.infer<typeof ScoreRecalculatedSchema>;
 export type ConfigurationChanged = z.infer<typeof ConfigurationChangedSchema>;
 export type PromotionInitiated = z.infer<typeof PromotionInitiatedSchema>;
@@ -456,6 +476,7 @@ export const AUDIT_EVENT_TYPES = [
   'evidence.submitted',
   'evidence.approved',
   'evidence.rejected',
+  'evidence.retrieved',
   'score.recalculated',
   'configuration.changed',
   'promotion.initiated',

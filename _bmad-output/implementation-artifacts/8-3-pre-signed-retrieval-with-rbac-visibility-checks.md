@@ -1,6 +1,13 @@
 # Story 8.3: Pre-signed retrieval with RBAC + visibility checks
 
-Status: backlog
+Status: done
+
+> AC3 implementation note: cross-org access surfaces as **404**, not
+> 403 — revealing 403 would leak row existence across tenants. The
+> 403 surface exists for the same-org-stranger case (actor is in the
+> right org but the row-level authz predicate denies them). Both
+> surfaces are pinned by the service tests; the integration test
+> covers the same-org-stranger 403 path explicitly.
 
 ## Story
 

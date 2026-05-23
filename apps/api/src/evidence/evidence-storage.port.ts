@@ -63,6 +63,19 @@ export interface EvidenceStorage {
    * post-finalize tampering.
    */
   head(key: string): Promise<HeadResult | null>;
+
+  /**
+   * Build a presigned GET URL the browser can fetch the object from
+   * (Story 8-3, Arch §9.2). TTL is short (default 10 min) so a leaked
+   * URL has a bounded window of exposure.
+   *
+   * No payload pinning is needed for GET — the signature covers
+   * `Bucket` + `Key` + `Expires` only. A second viewer with the same
+   * URL inside its TTL CAN re-fetch the bytes; that's accepted, as
+   * the audit event is emitted at presign time (one row per
+   * authorization pass), not per byte-level GET.
+   */
+  presignGet(args: PresignGetArgs): Promise<PresignGetResult>;
 }
 
 export type PresignPutArgs = {
@@ -81,6 +94,16 @@ export type HeadResult = {
   etag: string;
   contentType: string;
   sizeBytes: number;
+};
+
+export type PresignGetArgs = {
+  key: string;
+  ttlSeconds: number;
+};
+
+export type PresignGetResult = {
+  url: string;
+  expiresAt: Date;
 };
 
 /** Injection token for {@link EvidenceStorage} so tests can override

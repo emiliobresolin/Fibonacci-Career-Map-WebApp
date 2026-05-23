@@ -1,4 +1,5 @@
 import {
+  GetObjectCommand,
   HeadObjectCommand,
   PutObjectCommand,
   S3Client,
@@ -12,6 +13,8 @@ import type { Env } from '../common/env.config.js';
 import type {
   EvidenceStorage,
   HeadResult,
+  PresignGetArgs,
+  PresignGetResult,
   PresignPutArgs,
   PresignPutResult,
 } from './evidence-storage.port.js';
@@ -99,6 +102,17 @@ export class AwsS3EvidenceStorage implements EvidenceStorage {
       }
       throw err;
     }
+  }
+
+  async presignGet(args: PresignGetArgs): Promise<PresignGetResult> {
+    const bucket = this.requireBucket();
+    const client = this.getClient();
+    const cmd = new GetObjectCommand({ Bucket: bucket, Key: args.key });
+    const url = await getSignedUrl(client, cmd, { expiresIn: args.ttlSeconds });
+    return {
+      url,
+      expiresAt: new Date(Date.now() + args.ttlSeconds * 1000),
+    };
   }
 
   private requireBucket(): string {

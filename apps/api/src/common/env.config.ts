@@ -98,6 +98,11 @@ export const envSchema = z
     // minimum loose and let the requirement-type validation catch
     // empty-payload cases.
     EVIDENCE_UPLOAD_MIN_BYTES: z.coerce.number().int().nonnegative().default(1),
+    // Download-slot TTL in seconds (Story 8-3 AC1: 10 min). A short
+    // TTL bounds the exposure window if a presigned URL is leaked
+    // (forwarded link, observed in a proxy log). Operators can tune
+    // for browsers/networks where 10 min is too aggressive.
+    EVIDENCE_DOWNLOAD_TTL_SECONDS: z.coerce.number().int().positive().default(600),
   })
   .superRefine((val, ctx) => {
     if (val.NODE_ENV !== 'production') return;

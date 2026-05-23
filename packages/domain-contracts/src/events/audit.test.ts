@@ -53,6 +53,13 @@ const SAMPLES: Record<string, AuditEvent> = {
     before: null,
     after: { evidenceId: UUID_D, employeeId: UUID_E },
   }) as AuditEvent,
+  'evidence.retrieved': base({
+    eventType: 'evidence.retrieved',
+    entityType: 'evidence',
+    reason: null,
+    before: { evidenceId: UUID_D, employeeId: UUID_E, requirementId: UUID_F },
+    after: null,
+  }) as AuditEvent,
   'score.recalculated': base({
     eventType: 'score.recalculated',
     entityType: 'score_snapshot',
@@ -226,13 +233,13 @@ test('AUDIT_EVENT_TYPES enumerates exactly the variants of the discriminated uni
   );
   assert.equal(
     arrayTypes.size,
-    21,
+    22,
     // PRD §10.1 (11) + session.revoked (Story 2-3) + organization.created (Story 6-1)
     // + blocker.opened/resolved (Story 6-2b) + configuration.seeded (Story 6-3)
     // + bootstrap_admin.provisioned/disabled + recovery_codes.provisioned (Story 6-4)
     // + employee.imported (Story 6-5) + organization.promotion_mode.changed (Story 7-10)
-    // = 21
-    'PRD §10.1 (11) + session.revoked (Story 2-3) + organization.created (Story 6-1) + blocker.opened/resolved (Story 6-2b) + configuration.seeded (Story 6-3) + bootstrap_admin.provisioned/disabled + recovery_codes.provisioned (Story 6-4) + employee.imported (Story 6-5) = 20',
+    // + evidence.retrieved (Story 8-3) = 22
+    'PRD §10.1 (11) + session.revoked + organization.created + blocker.opened/resolved + configuration.seeded + bootstrap_admin.provisioned/disabled + recovery_codes.provisioned + employee.imported + organization.promotion_mode.changed + evidence.retrieved (8-3) = 22',
   );
 });
 

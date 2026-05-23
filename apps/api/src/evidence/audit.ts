@@ -25,6 +25,57 @@ import type { ActorContext } from '../auth/actor-context.js';
  * `apps/api/src/evidence/audit.ts` mirrors the configuration-module's
  * `apps/api/src/configuration/audit.ts` pattern.
  */
+/**
+ * Emit one `evidence.retrieved` outbox event (Story 8-3 AC4).
+ *
+ * Payload shape matches `EvidenceRetrievedSchema` in
+ * `@fcm/domain-contracts/events/audit`:
+ *   • `before: { evidenceId, employeeId, requirementId }` — context
+ *     about the row that was looked at; we mirror the
+ *     `session.revoked` pattern by carrying read-side context in
+ *     `before` and leaving `after` null since there's no state flip.
+ *   • `reason: null` — read events don't carry a reason.
+ *
+ * Called by {@link EvidenceDownloadService.createDownloadUrl} INSIDE
+ * `withOrgScope`, so the row's RLS predicate sees the right tenant.
+ * The retrieval emits one audit row per presigned-URL issuance, not
+ * per byte-level GET — a leaked URL re-fetched within its 10-min TTL
+ * leaves no extra audit footprint.
+ */
+export async function emitEvidenceRetrieved(
+  tx: Prisma.TransactionClient,
+  organizationId: string,
+  actor: ActorContext,
+  params: {
+    evidenceId: string;
+    employeeId: string;
+    requirementId: string;
+  },
+): Promise<{ eventId: string }> {
+  const eventId = randomUUID();
+  const payload: Prisma.InputJsonValue = {
+    actorId: actor.user_id,
+    reason: null,
+    before: {
+      evidenceId: params.evidenceId,
+      employeeId: params.employeeId,
+      requirementId: params.requirementId,
+    },
+    after: null,
+  };
+  await tx.outboxEvent.create({
+    data: {
+      eventId,
+      organizationId,
+      aggregateType: 'evidence',
+      aggregateId: params.evidenceId,
+      eventType: 'evidence.retrieved',
+      payload,
+    },
+  });
+  return { eventId };
+}
+
 export async function emitEvidenceSubmitted(
   tx: Prisma.TransactionClient,
   organizationId: string,

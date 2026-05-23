@@ -2,6 +2,8 @@ import { Module } from '@nestjs/common';
 
 import { AwsS3EvidenceStorage } from './aws-s3-evidence-storage.js';
 import { EvidenceController } from './evidence.controller.js';
+import { EvidenceDownloadController } from './evidence-download.controller.js';
+import { EvidenceDownloadService } from './evidence-download.service.js';
 import { EvidenceFinalizeService } from './evidence-finalize.service.js';
 import { EVIDENCE_STORAGE } from './evidence-storage.port.js';
 import { EvidenceUploadService } from './evidence-upload.service.js';
@@ -22,12 +24,18 @@ import { EvidenceUploadService } from './evidence-upload.service.js';
  * mocking the AWS SDK itself.
  */
 @Module({
-  controllers: [EvidenceController],
+  controllers: [EvidenceController, EvidenceDownloadController],
   providers: [
     EvidenceUploadService,
     EvidenceFinalizeService,
+    EvidenceDownloadService,
     { provide: EVIDENCE_STORAGE, useClass: AwsS3EvidenceStorage },
   ],
-  exports: [EvidenceUploadService, EvidenceFinalizeService, EVIDENCE_STORAGE],
+  exports: [
+    EvidenceUploadService,
+    EvidenceFinalizeService,
+    EvidenceDownloadService,
+    EVIDENCE_STORAGE,
+  ],
 })
 export class EvidenceModule {}
