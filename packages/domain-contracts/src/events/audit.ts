@@ -102,6 +102,19 @@ export const EvidenceRejectedSchema = AuditBaseSchema.extend({
     // Story 8-5 AC2: same actorRole capture as evidence.approved,
     // inside `after` so the relay actually persists it.
     actorRole: RoleSchema.optional(),
+    // Story 8-6 AC3: when an APPROVED row is retroactively rejected
+    // (FR-4.7), `retroactive` is true and `approvedAt` / `rejectedAt`
+    // carry the date pair for date-discrepancy investigation.
+    //
+    // CONSUMER CONTRACT: audit-readers MUST treat field ABSENCE as
+    // "first-pass rejection" (PENDING_APPROVAL → REJECTED). The
+    // emit-side (apps/api/src/evidence/audit.ts) only sets these
+    // three fields when the source state was APPROVED, so a
+    // first-pass payload has none of them; relying on
+    // `payload.after.retroactive === true` is the canonical check.
+    retroactive: z.boolean().optional(),
+    approvedAt: IsoDateSchema.optional(),
+    rejectedAt: IsoDateSchema.optional(),
   }),
 });
 

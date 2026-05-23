@@ -37,10 +37,25 @@ export async function enqueueScoringRecalcEmployee(
   actor: ActorContext,
   data: WithoutActor<ScoringRecalcEmployeePayload>,
 ): Promise<void> {
-  // Deterministic jobId per (employee, trigger). Two consecutive
-  // approves on the same employee coalesce into one recalc — BullMQ's
-  // `getJob(jobId)` returns the existing entry on duplicate `add`.
-  const jobId = `recalc:${data.employeeId}:${data.trigger}`;
+  // Deterministic jobId. When `originatingEventId` is supplied (every
+  // first-class business mutation: evidence.approved, evidence.rejected
+  // retroactive, role/config changes), the id is per-event so each
+  // mutation gets its own recalc — critical for the Story 8-6 BLOCKER
+  // fix: two retroactive rejections of DIFFERENT evidence rows for
+  // the same employee MUST NOT coalesce, because the second's score
+  // delta would be lost if the first job snapshotted state before the
+  // second's commit. RecalcJobService.claim() handles dedup at the
+  // (employee, triggering_event) idempotency layer downstream, so
+  // duplicate adds with the same originatingEventId still no-op
+  // correctly.
+  //
+  // When no originatingEventId is supplied (e.g. a manual recalc),
+  // we fall back to coalescing per (employee, trigger). Rapid manual
+  // recalc requests merge into one — that's the right behavior since
+  // they're polling for the same snapshot.
+  const jobId = data.originatingEventId
+    ? `recalc:${data.employeeId}:${data.trigger}:${data.originatingEventId}`
+    : `recalc:${data.employeeId}:${data.trigger}`;
   await queue.add('recalc', withActor(actor, data) as ScoringRecalcEmployeePayload, { jobId });
 }
 

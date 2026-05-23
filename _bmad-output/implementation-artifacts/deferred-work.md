@@ -86,3 +86,8 @@ Tracks items from reviews that were intentionally deferred — not dismissed, no
 ## Deferred from: Story 8-5 review (admin/HR override + actor_role, 2026-05-23)
 
 - **F8-5a (dedicated `audit_events.actor_role` column).** Today the actor's role is persisted as `audit_events.after->>'actorRole'` (JSONB extraction). Works for HR investigations but a btree index on a top-level column would be faster for the "manager-approval-pattern" report (Story 15-7). Add an `actor_role` column on `audit_events` + backfill from the JSONB once the report ships. The column would need GIN-or-btree indexing across the monthly partitions.
+
+## Deferred from: Story 8-6 review (retroactive rejection, 2026-05-23)
+
+- **F8-6a (priorContributedWeight in `evidence.rejected` retroactive payload).** Today the audit payload carries `retroactive: true` + `approvedAt` + `rejectedAt`, but no score-impact magnitude. HR forensics tracing FR-4.7 incidents would benefit from a `priorContributedWeight: N` field showing the score weight removed by the retroactive rejection. Lands with Epic 9 scoring (the value is computable only once `calculateScore` exists). Stub now as `priorContributedWeight: 0` placeholder if the audit-read UI needs the field present in 8-X-era data.
+- **F8-6b (exhaustive type check on EvidenceStateMachine source state).** The reject() service casts `row.state as 'PENDING_APPROVAL' | 'APPROVED'` before passing to `assertCanTransition`. If a new state ever lands in the EvidenceState enum, TS won't catch the missing branch. Refactor to `row.state as EvidenceState` + add an exhaustive switch with `assertNever`.

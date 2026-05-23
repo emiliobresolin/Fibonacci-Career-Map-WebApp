@@ -26,6 +26,12 @@ export type ScoringRecalcEmployeePayload = JobPayloadWithActor<{
   trigger:
     | 'evidence.approved'
     | 'evidence.rejected'
+    /** Story 8-6 (FR-4.7) — APPROVED → REJECTED retroactive path.
+     *  Distinct trigger so the Epic-9 recalc consumer can pick the
+     *  right strategy (the score delta from removing previously-
+     *  counted evidence is different from a first-pass rejection
+     *  that never contributed). */
+    | 'evidence.retroactively_rejected'
     | 'role_assignment.changed'
     | 'configuration.changed'
     | 'manual';

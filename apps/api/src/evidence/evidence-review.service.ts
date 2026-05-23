@@ -51,6 +51,9 @@ export type RejectResult = {
   state: 'REJECTED';
   decidedAt: string;
   approvalRecordId: string;
+  /** Story 8-6 AC3 — true when this was a retroactive rejection of
+   *  a previously-approved row (vs. a first-pass PENDING → REJECTED). */
+  retroactive: boolean;
 };
 
 /**
@@ -240,7 +243,7 @@ export class EvidenceReviewService {
     const id = validateUuid(evidenceId, 'evidenceId');
     const reason = validateReason(input?.reason, REJECT_REASON_MIN, 'reason');
 
-    return await withOrgScope(this.prisma, actor.organization_id, async (tx) => {
+    const result = await withOrgScope(this.prisma, actor.organization_id, async (tx) => {
       const row = await this.lockEvidenceWithOwner(tx, id, actor.organization_id);
 
       try {
@@ -266,38 +269,31 @@ export class EvidenceReviewService {
       // audit row.
       const reviewVia = await this.assertReviewAuthorized(tx, actor, row.employeeId);
 
-      // Story 8-4 handles the PENDING_APPROVAL → REJECTED transition
-      // only. APPROVED → REJECTED is legal in the state machine
-      // (retroactive rejection per FR-4.7) but lands in Story 8-6
-      // with its own code path (score recalc, audit context). Refuse
-      // it here so the surface is sharp: this endpoint is for the
-      // first-pass review only. APPROVED gets a distinct error code
-      // so the client can route to the retroactive surface once 8-6
-      // ships; truly illegal sources (DRAFT/REJECTED/EXPIRED) get
-      // the generic illegal_state_transition.
-      if (row.state === 'APPROVED') {
-        throw new ConflictException({
-          error: 'use_retroactive_reject_endpoint',
-          message:
-            'Approved evidence is rejected via the retroactive-rejection endpoint (Story 8-6), not this one',
-          from: row.state,
-          to: 'REJECTED',
-        });
-      }
-      if (row.state !== 'PENDING_APPROVAL') {
+      // Story 8-4: PENDING_APPROVAL → REJECTED (first-pass review).
+      // Story 8-6 (FR-4.7): APPROVED → REJECTED (retroactive rejection
+      // — preserves approved_at, enqueues a recalc with the synthetic
+      // 'evidence.retroactively_rejected' trigger so the Epic-9
+      // consumer rebuilds the score with the previously-counted
+      // contribution removed, and flags the audit row).
+      // DRAFT / REJECTED / EXPIRED are illegal sources.
+      const isRetroactive = row.state === 'APPROVED';
+      if (row.state !== 'PENDING_APPROVAL' && row.state !== 'APPROVED') {
         throw new ConflictException({
           error: 'illegal_state_transition',
-          message: `Cannot reject evidence in state ${row.state}; only PENDING_APPROVAL is supported by this endpoint`,
+          message: `Cannot reject evidence in state ${row.state}`,
           from: row.state,
           to: 'REJECTED',
         });
       }
-      // Belt-and-braces: state machine also confirms the edge is
-      // legal. This is a tautology given the explicit check above,
-      // but keeps the symmetry with approve() in case the explicit
-      // check is ever loosened.
+      // Belt-and-braces — both PENDING_APPROVAL → REJECTED and
+      // APPROVED → REJECTED are legal in the state machine
+      // (8-1). A future tightening of the state graph would
+      // surface here.
       try {
-        EvidenceStateMachine.assertCanTransition('PENDING_APPROVAL', 'REJECTED');
+        EvidenceStateMachine.assertCanTransition(
+          row.state as 'PENDING_APPROVAL' | 'APPROVED',
+          'REJECTED',
+        );
       } catch (err) {
         if (err instanceof IllegalEvidenceTransitionError) {
           throw new ConflictException({
@@ -315,9 +311,15 @@ export class EvidenceReviewService {
         where: { id },
         data: {
           state: 'REJECTED',
-          // approved_at stays null for a never-approved rejection.
-          // (Retroactive rejection of an APPROVED row preserves
-          // approved_at via Story 8-6's separate code path.)
+          // approved_at is preserved across BOTH paths:
+          //   - First-pass (PENDING_APPROVAL → REJECTED): row was
+          //     never approved, approved_at stays null.
+          //   - Retroactive (APPROVED → REJECTED): row WAS approved,
+          //     approved_at stays set — Story 8-1's CHECK constraint
+          //     allows either value for REJECTED rows, and the audit-
+          //     read surface needs the original date for FR-4.7
+          //     forensics. The expires_at also stays as-is for the
+          //     same historical-fact reason.
         },
       });
 
@@ -332,14 +334,31 @@ export class EvidenceReviewService {
         },
       });
 
+      if (isRetroactive && row.approvedAt === null) {
+        // Invariant: the 8-1 `evidence_approved_at_consistency`
+        // CHECK pins approved_at NOT NULL for APPROVED rows. A null
+        // value here means the constraint was bypassed somehow
+        // (migration regression, direct psql, broken trigger). Fail
+        // LOUD rather than silently emit a malformed audit row.
+        throw new Error(
+          `invariant violation: evidence ${id} is APPROVED but approved_at is null`,
+        );
+      }
       await emitEvidenceRejected(tx, actor.organization_id, actor, {
         evidenceId: id,
         employeeId: updated.employeeId,
         reason,
+        ...(isRetroactive
+          ? {
+              retroactive: true,
+              approvedAt: row.approvedAt!,
+              rejectedAt: decidedAt,
+            }
+          : {}),
       });
 
       this.logger.log(
-        `evidence ${id} REJECTED via=${reviewVia} actor=${actor.user_id} approvalRecord=${approvalRecord.id}`,
+        `evidence ${id} REJECTED retroactive=${isRetroactive} via=${reviewVia} actor=${actor.user_id} approvalRecord=${approvalRecord.id}`,
       );
 
       return {
@@ -347,8 +366,40 @@ export class EvidenceReviewService {
         state: 'REJECTED' as const,
         decidedAt: decidedAt.toISOString(),
         approvalRecordId: approvalRecord.id,
+        retroactive: isRetroactive,
+        employeeId: updated.employeeId,
       };
     });
+
+    // AC2 — retroactive rejection triggers a recalc with the
+    // synthetic `evidence.retroactively_rejected` trigger so the
+    // Epic-9 consumer rebuilds the affected employee's score with
+    // the previously-counted contribution removed. First-pass
+    // rejections (PENDING → REJECTED) do NOT enqueue — the row was
+    // never APPROVED so it never contributed to score.
+    if (result.retroactive) {
+      try {
+        await enqueueScoringRecalcEmployee(this.recalcQueue, actor, {
+          employeeId: result.employeeId,
+          trigger: 'evidence.retroactively_rejected',
+          originatingEventId: result.approvalRecordId,
+        });
+      } catch (err) {
+        this.logger.error(
+          `scoring.recalc-employee (retroactive) enqueue failed for evidence=${id} approvalRecord=${result.approvalRecordId}: ${(err as Error).message}`,
+        );
+        // Do NOT throw — audit + state already committed (same
+        // posture as approve()).
+      }
+    }
+
+    return {
+      evidenceId: result.evidenceId,
+      state: result.state,
+      decidedAt: result.decidedAt,
+      approvalRecordId: result.approvalRecordId,
+      retroactive: result.retroactive,
+    };
   }
 
   // ── helpers ─────────────────────────────────────────────────────
@@ -425,6 +476,7 @@ export class EvidenceReviewService {
     employeeId: string;
     requirementExpiryMonths: number | null;
     ownerUserId: string;
+    approvedAt: Date | null;
   }> {
     // SELECT FOR UPDATE on the evidence row, joining employee for the
     // owner User and requirement for expiry_months. UUID is param-
@@ -436,15 +488,20 @@ export class EvidenceReviewService {
     // cross-org id probe distinguish "row exists but RLS hides it"
     // from "row missing" through query duration. Matches the post-
     // review fix from Story 8-3.
+    //
+    // `approved_at` is selected so the Story 8-6 retroactive
+    // rejection path can pull the original approval date into the
+    // audit event (AC3) for date-discrepancy investigation.
     const locked = await tx.$queryRaw<
       Array<{
         state: string;
         employee_id: string;
         owner_user_id: string;
         expiry_months: number | null;
+        approved_at: Date | null;
       }>
     >(Prisma.sql`
-      SELECT e.state, e.employee_id, emp.user_id AS owner_user_id, req.expiry_months
+      SELECT e.state, e.employee_id, emp.user_id AS owner_user_id, req.expiry_months, e.approved_at
         FROM evidence e
         JOIN employees emp    ON emp.id = e.employee_id
         JOIN requirements req ON req.id = e.requirement_id
@@ -462,6 +519,7 @@ export class EvidenceReviewService {
     return {
       state: row.state,
       employeeId: row.employee_id,
+      approvedAt: row.approved_at,
       ownerUserId: row.owner_user_id,
       requirementExpiryMonths: row.expiry_months,
     };

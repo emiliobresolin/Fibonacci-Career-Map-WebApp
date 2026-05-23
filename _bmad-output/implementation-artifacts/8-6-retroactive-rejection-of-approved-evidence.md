@@ -1,6 +1,22 @@
 # Story 8.6: Retroactive rejection of APPROVED evidence
 
-Status: backlog
+Status: done
+
+> Implementation note: the retroactive path lives on the SAME endpoint
+> as 8-4's first-pass reject (`PATCH /v1/evidence/:id/reject`); the
+> service branches on source state. Pre-8-6 the endpoint returned 409
+> `use_retroactive_reject_endpoint` for APPROVED — that branch is
+> removed in 8-6.
+>
+> AC2 `EvidenceRetroactivelyRejected` triggering event is the
+> `'evidence.retroactively_rejected'` value of the
+> `ScoringRecalcEmployeePayload.trigger` union. The recalc enqueue
+> jobId now carries `originatingEventId` so two retroactive rejects
+> on the same employee don't coalesce in BullMQ (caught in review).
+>
+> AC3 `retroactive` / `approvedAt` / `rejectedAt` live INSIDE
+> `evidence.rejected.after` (same JSONB-persistence reasoning as
+> Story 8-5's `actorRole`).
 
 ## Story
 

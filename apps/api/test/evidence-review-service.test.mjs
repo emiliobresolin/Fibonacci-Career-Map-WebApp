@@ -31,6 +31,7 @@ function makePrisma({
     employee_id: EMP,
     owner_user_id: OWNER_USER,
     expiry_months: null,
+    approved_at: null,
   },
   // Story 8-5 — defaults grant the actor MANAGER access (employee
   // row exists, subject's assignment lists the actor as direct
@@ -362,12 +363,271 @@ test('AC5: reject emits one evidence.rejected outbox event', async () => {
   assert.equal(calls.outboxCreate[0].payload.reason, REJECT_REASON);
 });
 
-test('AC5: reject does NOT enqueue a recalc (state never had APPROVED score)', async () => {
+test('AC5: first-pass reject (PENDING → REJECTED) does NOT enqueue a recalc', async () => {
+  // Row was never APPROVED, so it never contributed to score. No
+  // recalc work to do. Story 8-6 retroactive path is what enqueues
+  // (separate test below).
   const { prisma } = makePrisma();
   const queue = makeQueue();
   const svc = new EvidenceReviewService(prisma, queue);
   await svc.reject(managerActor, EV, { reason: REJECT_REASON });
   assert.equal(queue.calls.add.length, 0);
+});
+
+// ── Story 8-6: retroactive rejection of APPROVED evidence ───────
+
+test('8-6 AC1: APPROVED → REJECTED succeeds + preserves approved_at AND expires_at', async () => {
+  const approvedAt = new Date('2026-01-15T10:00:00Z');
+  const { prisma, calls } = makePrisma({
+    row: {
+      state: 'APPROVED',
+      employee_id: EMP,
+      owner_user_id: OWNER_USER,
+      expiry_months: null,
+      approved_at: approvedAt,
+    },
+  });
+  const svc = new EvidenceReviewService(prisma, makeQueue());
+  const result = await svc.reject(managerActor, EV, { reason: REJECT_REASON });
+  assert.equal(result.state, 'REJECTED');
+  assert.equal(result.retroactive, true);
+  // The evidence.update payload must NOT touch approved_at OR
+  // expires_at — both are historical facts that the audit-read
+  // surface needs to render "approved on … expired on …" even after
+  // the row is REJECTED. The 8-1 CHECK allows REJECTED with either
+  // NULL or NOT NULL approved_at.
+  assert.equal(calls.evidenceUpdate[0].data.approvedAt, undefined);
+  assert.equal(calls.evidenceUpdate[0].data.expiresAt, undefined);
+  assert.equal(calls.evidenceUpdate[0].data.state, 'REJECTED');
+});
+
+test('8-6 AC1: ADMIN can retroactively reject (admin override applies to retroactive path too)', async () => {
+  const ADMIN_USER = 'cccccccc-cccc-4ccc-8ccc-cccccccccccc';
+  const adminActor = {
+    user_id: ADMIN_USER,
+    organization_id: ORG,
+    role: 'ADMIN',
+    display_name: 'Admin',
+  };
+  const approvedAt = new Date('2026-01-15T10:00:00Z');
+  const { prisma } = makePrisma({
+    row: {
+      state: 'APPROVED',
+      employee_id: EMP,
+      owner_user_id: OWNER_USER,
+      expiry_months: null,
+      approved_at: approvedAt,
+    },
+    actorEmployee: null,
+    subjectAssignments: [],
+  });
+  const queue = makeQueue();
+  const svc = new EvidenceReviewService(prisma, queue);
+  const result = await svc.reject(adminActor, EV, { reason: REJECT_REASON });
+  assert.equal(result.state, 'REJECTED');
+  assert.equal(result.retroactive, true);
+  // Admin retro-reject also enqueues the recalc.
+  assert.equal(queue.calls.add.length, 1);
+  assert.equal(queue.calls.add[0].data.trigger, 'evidence.retroactively_rejected');
+});
+
+test('8-6 AC2: retroactive rejection enqueues recalc with evidence.retroactively_rejected trigger', async () => {
+  const approvedAt = new Date('2026-01-15T10:00:00Z');
+  const { prisma } = makePrisma({
+    row: {
+      state: 'APPROVED',
+      employee_id: EMP,
+      owner_user_id: OWNER_USER,
+      expiry_months: null,
+      approved_at: approvedAt,
+    },
+  });
+  const queue = makeQueue();
+  const svc = new EvidenceReviewService(prisma, queue);
+  await svc.reject(managerActor, EV, { reason: REJECT_REASON });
+  assert.equal(queue.calls.add.length, 1);
+  const job = queue.calls.add[0];
+  assert.equal(job.data.trigger, 'evidence.retroactively_rejected');
+  assert.equal(job.data.employeeId, EMP);
+  assert.equal(job.data.actor.user_id, MGR_USER);
+  // jobId carries the originatingEventId (= approval record id) so
+  // two retroactive rejects on DIFFERENT evidence rows for the same
+  // employee don't coalesce in BullMQ. See B1-regression test below.
+  assert.match(
+    job.opts.jobId,
+    new RegExp(`^recalc:${EMP}:evidence.retroactively_rejected:[0-9a-f-]+$`),
+  );
+});
+
+test('8-6 B1-regression: two retroactive rejects on the same employee get DIFFERENT jobIds (no BullMQ coalesce)', async () => {
+  // Without the originatingEventId in jobId, two rapid retroactive
+  // rejections of different evidence rows for the same employee
+  // would dedupe at BullMQ and the second's score effect would be
+  // lost (if the first recalc snapshotted state before the second
+  // commit). Originating-event-id-in-jobId is the fix; this test
+  // pins it so a future "simplify the jobId" change fails loudly.
+  const approvedAt = new Date('2026-01-15T10:00:00Z');
+  const queue = makeQueue();
+  // First retro-reject — use a stub that returns approvalRecordId
+  // = 'first-record'.
+  let recordCounter = 0;
+  const sharedTxFactory = () => {
+    recordCounter += 1;
+    const recordId = `${recordCounter}1111111-1111-4111-8111-aaaaaaaaaaaa`.slice(0, 36);
+    const { prisma } = makePrismaWithRecordId({
+      row: {
+        state: 'APPROVED',
+        employee_id: EMP,
+        owner_user_id: OWNER_USER,
+        expiry_months: null,
+        approved_at: approvedAt,
+      },
+      recordId,
+    });
+    return prisma;
+  };
+  const svc1 = new EvidenceReviewService(sharedTxFactory(), queue);
+  await svc1.reject(managerActor, EV, { reason: REJECT_REASON });
+  const svc2 = new EvidenceReviewService(sharedTxFactory(), queue);
+  await svc2.reject(
+    managerActor,
+    'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    { reason: REJECT_REASON },
+  );
+  assert.equal(queue.calls.add.length, 2);
+  assert.notEqual(
+    queue.calls.add[0].opts.jobId,
+    queue.calls.add[1].opts.jobId,
+    'two retroactive rejects on the same employee MUST get distinct jobIds',
+  );
+});
+
+function makePrismaWithRecordId({ row, recordId }) {
+  const tx = {
+    $executeRaw: async () => 0,
+    $queryRaw: async (template) => {
+      const sqlStr = Array.isArray(template?.strings) ? template.strings.join('?') : String(template);
+      if (/SELECT e\.state/.test(sqlStr)) return [row];
+      return [];
+    },
+    evidence: {
+      update: async ({ where, data }) => ({
+        id: where.id,
+        employeeId: EMP,
+        requirementId: REQ,
+        state: data.state,
+        approvedAt: data.approvedAt ?? null,
+        expiresAt: data.expiresAt ?? null,
+      }),
+    },
+    employee: { findFirst: async () => ({ id: MGR_EMP }) },
+    employeeAssignment: {
+      findMany: async () => [{ managerEmployeeId: MGR_EMP, deactivatedAt: null }],
+    },
+    approvalRecord: { create: async ({ data }) => ({ id: recordId, ...data }) },
+    outboxEvent: { create: async ({ data }) => data },
+  };
+  const prisma = { $transaction: async (fn) => await fn(tx) };
+  return { prisma };
+}
+
+test('8-6 AC3: audit payload carries retroactive=true + approvedAt + rejectedAt (date-discrepancy investigation)', async () => {
+  const approvedAt = new Date('2026-01-15T10:00:00Z');
+  const { prisma, calls } = makePrisma({
+    row: {
+      state: 'APPROVED',
+      employee_id: EMP,
+      owner_user_id: OWNER_USER,
+      expiry_months: null,
+      approved_at: approvedAt,
+    },
+  });
+  const svc = new EvidenceReviewService(prisma, makeQueue());
+  await svc.reject(managerActor, EV, { reason: REJECT_REASON });
+  const out = calls.outboxCreate[0];
+  assert.equal(out.eventType, 'evidence.rejected');
+  assert.equal(out.payload.after.retroactive, true);
+  assert.equal(out.payload.after.approvedAt, approvedAt.toISOString());
+  assert.ok(out.payload.after.rejectedAt, 'rejectedAt must be set');
+  // rejectedAt must be a valid ISO string AFTER approvedAt.
+  const rejectedAt = new Date(out.payload.after.rejectedAt);
+  assert.ok(rejectedAt.getTime() > approvedAt.getTime());
+});
+
+test('8-6 AC3: audit payload from first-pass reject DOES NOT carry retroactive/approvedAt/rejectedAt', async () => {
+  // The retroactive fields are only present on the APPROVED → REJECTED
+  // path. PENDING → REJECTED keeps the legacy payload shape so audit
+  // readers can detect retroactive cases purely by field presence.
+  const { prisma, calls } = makePrisma();
+  const svc = new EvidenceReviewService(prisma, makeQueue());
+  await svc.reject(managerActor, EV, { reason: REJECT_REASON });
+  const after = calls.outboxCreate[0].payload.after;
+  assert.equal(after.retroactive, undefined);
+  assert.equal(after.approvedAt, undefined);
+  assert.equal(after.rejectedAt, undefined);
+});
+
+test('8-6: retroactive audit payload validates against the AuditEvent contract', async () => {
+  const { safeParseAuditEvent } = await import('@fcm/domain-contracts');
+  const approvedAt = new Date('2026-01-15T10:00:00Z');
+  const { prisma, calls } = makePrisma({
+    row: {
+      state: 'APPROVED',
+      employee_id: EMP,
+      owner_user_id: OWNER_USER,
+      expiry_months: null,
+      approved_at: approvedAt,
+    },
+  });
+  const svc = new EvidenceReviewService(prisma, makeQueue());
+  await svc.reject(managerActor, EV, { reason: REJECT_REASON });
+  const out = calls.outboxCreate[0];
+  const audited = {
+    eventType: out.eventType,
+    entityType: 'evidence',
+    eventId: out.eventId,
+    occurredAt: new Date().toISOString(),
+    actorId: out.payload.actorId,
+    organizationId: out.organizationId,
+    entityId: out.aggregateId,
+    reason: out.payload.reason,
+    before: out.payload.before,
+    after: out.payload.after,
+  };
+  const parsed = safeParseAuditEvent(audited);
+  assert.ok(parsed.ok, `relay would reject: ${parsed.ok ? '' : JSON.stringify(parsed.error?.issues)}`);
+  assert.equal(parsed.event.after.retroactive, true);
+});
+
+test('8-6: REJECTED → REJECTED is still illegal (terminal state)', async () => {
+  const { prisma } = makePrisma({
+    row: { state: 'REJECTED', employee_id: EMP, owner_user_id: OWNER_USER, expiry_months: null, approved_at: null },
+  });
+  const svc = new EvidenceReviewService(prisma, makeQueue());
+  let threw = false;
+  try {
+    await svc.reject(managerActor, EV, { reason: REJECT_REASON });
+  } catch (err) {
+    threw = true;
+    assert.equal(err.getStatus(), 409);
+    assert.equal(err.getResponse()?.error, 'illegal_state_transition');
+  }
+  assert.ok(threw);
+});
+
+test('8-6: EXPIRED → REJECTED is still illegal (terminal state)', async () => {
+  const { prisma } = makePrisma({
+    row: { state: 'EXPIRED', employee_id: EMP, owner_user_id: OWNER_USER, expiry_months: null, approved_at: new Date() },
+  });
+  const svc = new EvidenceReviewService(prisma, makeQueue());
+  let threw = false;
+  try {
+    await svc.reject(managerActor, EV, { reason: REJECT_REASON });
+  } catch (err) {
+    threw = true;
+    assert.equal(err.getStatus(), 409);
+  }
+  assert.ok(threw);
 });
 
 // ── State-machine integration ─────────────────────────────────────
@@ -389,23 +649,25 @@ test('approve rejects when evidence is DRAFT with 409 illegal_state_transition',
   assert.ok(threw);
 });
 
-test('reject rejects when evidence is APPROVED with 409 use_retroactive_reject_endpoint', async () => {
-  // Retroactive APPROVED → REJECTED is legal in the state machine
-  // (FR-4.7) but lives in Story 8-6 with its own code path. The
-  // separate error code lets the client route to the right surface.
+test('Story 8-6: reject NOW accepts APPROVED source (retroactive rejection)', async () => {
+  // Story 8-4 originally returned 409 use_retroactive_reject_endpoint
+  // for APPROVED → REJECTED, with the comment that 8-6 would land
+  // the retroactive path. 8-6 ships that path on the SAME endpoint,
+  // gated by source state. APPROVED → REJECTED now succeeds.
+  const approvedAt = new Date('2026-01-15T10:00:00Z');
   const { prisma } = makePrisma({
-    row: { state: 'APPROVED', employee_id: EMP, owner_user_id: OWNER_USER, expiry_months: null },
+    row: {
+      state: 'APPROVED',
+      employee_id: EMP,
+      owner_user_id: OWNER_USER,
+      expiry_months: null,
+      approved_at: approvedAt,
+    },
   });
   const svc = new EvidenceReviewService(prisma, makeQueue());
-  let threw = false;
-  try {
-    await svc.reject(managerActor, EV, { reason: REJECT_REASON });
-  } catch (err) {
-    threw = true;
-    assert.equal(err.getStatus(), 409);
-    assert.equal(err.getResponse()?.error, 'use_retroactive_reject_endpoint');
-  }
-  assert.ok(threw);
+  const result = await svc.reject(managerActor, EV, { reason: REJECT_REASON });
+  assert.equal(result.state, 'REJECTED');
+  assert.equal(result.retroactive, true);
 });
 
 test('reject returns generic illegal_state_transition for truly illegal sources (DRAFT)', async () => {

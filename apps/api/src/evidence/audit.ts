@@ -150,21 +150,39 @@ export async function emitEvidenceRejected(
     evidenceId: string;
     employeeId: string;
     reason: string;
+    /** Story 8-6 AC3 — set true when an APPROVED row is being
+     *  retroactively rejected (FR-4.7). Pulls the approval date
+     *  pair into the audit payload for date-discrepancy
+     *  investigation. */
+    retroactive?: boolean;
+    /** Original approval timestamp; required when retroactive=true. */
+    approvedAt?: Date;
+    /** The rejection timestamp for the audit row (NOW at emit). */
+    rejectedAt?: Date;
   },
 ): Promise<{ eventId: string }> {
   const eventId = randomUUID();
+  // Build the after object incrementally so retroactive-only fields
+  // are absent on first-pass rejections (matches the
+  // EvidenceRejectedSchema's `.optional()` shape).
+  const after: Record<string, unknown> = {
+    evidenceId: params.evidenceId,
+    employeeId: params.employeeId,
+    // Story 8-5 AC2: actorRole lives inside `after` so the
+    // outbox-relay actually persists it (audit_events has no
+    // top-level actor_role column).
+    actorRole: actor.role,
+  };
+  if (params.retroactive) {
+    after.retroactive = true;
+    if (params.approvedAt) after.approvedAt = params.approvedAt.toISOString();
+    if (params.rejectedAt) after.rejectedAt = params.rejectedAt.toISOString();
+  }
   const payload: Prisma.InputJsonValue = {
     actorId: actor.user_id,
     reason: params.reason,
     before: null,
-    after: {
-      evidenceId: params.evidenceId,
-      employeeId: params.employeeId,
-      // Story 8-5 AC2: actorRole lives inside `after` so the
-      // outbox-relay actually persists it (audit_events has no
-      // top-level actor_role column).
-      actorRole: actor.role,
-    },
+    after: after as Prisma.InputJsonValue,
   };
   await tx.outboxEvent.create({
     data: {
