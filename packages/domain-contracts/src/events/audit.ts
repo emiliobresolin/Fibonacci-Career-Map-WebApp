@@ -118,6 +118,28 @@ export const EvidenceRejectedSchema = AuditBaseSchema.extend({
   }),
 });
 
+/** Story 8-7 — the daily expiry-scan cron flipping APPROVED →
+ *  EXPIRED. One audit row per evidence item that transitions. The
+ *  payload carries the original `approvedAt` + the trigger `expiredAt`
+ *  + the `requirementId` so audit readers can render "expired N
+ *  months after approval" for the affected employee timeline.
+ *  `actorId` is null because the transition is system-initiated
+ *  (cron, not a human actor). */
+export const EvidenceExpiredSchema = AuditBaseSchema.extend({
+  eventType: z.literal('evidence.expired'),
+  entityType: z.literal('evidence'),
+  reason: z.string().nullable(),
+  before: z.object({
+    evidenceId: UuidSchema,
+    employeeId: UuidSchema,
+    requirementId: UuidSchema,
+    approvedAt: IsoDateSchema,
+  }),
+  after: z.object({
+    expiredAt: IsoDateSchema,
+  }),
+});
+
 /** Story 8-3 — every successful presigned-GET issuance lands one
  *  `evidence.retrieved` row. Carries the actor (who got the URL) +
  *  the subject (whose evidence) + the requirement. Useful for the
@@ -449,6 +471,7 @@ export const AuditEventSchema = z.discriminatedUnion('eventType', [
   EvidenceApprovedSchema,
   EvidenceRejectedSchema,
   EvidenceRetrievedSchema,
+  EvidenceExpiredSchema,
   ScoreRecalculatedSchema,
   ConfigurationChangedSchema,
   PromotionInitiatedSchema,
@@ -476,6 +499,7 @@ export type EvidenceSubmitted = z.infer<typeof EvidenceSubmittedSchema>;
 export type EvidenceApproved = z.infer<typeof EvidenceApprovedSchema>;
 export type EvidenceRejected = z.infer<typeof EvidenceRejectedSchema>;
 export type EvidenceRetrieved = z.infer<typeof EvidenceRetrievedSchema>;
+export type EvidenceExpired = z.infer<typeof EvidenceExpiredSchema>;
 export type ScoreRecalculated = z.infer<typeof ScoreRecalculatedSchema>;
 export type ConfigurationChanged = z.infer<typeof ConfigurationChangedSchema>;
 export type PromotionInitiated = z.infer<typeof PromotionInitiatedSchema>;
@@ -501,6 +525,7 @@ export const AUDIT_EVENT_TYPES = [
   'evidence.approved',
   'evidence.rejected',
   'evidence.retrieved',
+  'evidence.expired',
   'score.recalculated',
   'configuration.changed',
   'promotion.initiated',

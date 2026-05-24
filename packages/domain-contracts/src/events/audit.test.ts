@@ -61,6 +61,15 @@ const SAMPLES: Record<string, AuditEvent> = {
     before: { evidenceId: UUID_D, employeeId: UUID_E, requirementId: UUID_F },
     after: null,
   }) as AuditEvent,
+  'evidence.expired': base({
+    eventType: 'evidence.expired',
+    entityType: 'evidence',
+    // System-actor (cron) — actorId is null.
+    actorId: null,
+    reason: null,
+    before: { evidenceId: UUID_D, employeeId: UUID_E, requirementId: UUID_F, approvedAt: '2025-05-23T12:00:00.000Z' },
+    after: { expiredAt: TS },
+  }) as AuditEvent,
   'score.recalculated': base({
     eventType: 'score.recalculated',
     entityType: 'score_snapshot',
@@ -234,13 +243,13 @@ test('AUDIT_EVENT_TYPES enumerates exactly the variants of the discriminated uni
   );
   assert.equal(
     arrayTypes.size,
-    22,
+    23,
     // PRD §10.1 (11) + session.revoked (Story 2-3) + organization.created (Story 6-1)
     // + blocker.opened/resolved (Story 6-2b) + configuration.seeded (Story 6-3)
     // + bootstrap_admin.provisioned/disabled + recovery_codes.provisioned (Story 6-4)
     // + employee.imported (Story 6-5) + organization.promotion_mode.changed (Story 7-10)
-    // + evidence.retrieved (Story 8-3) = 22
-    'PRD §10.1 (11) + session.revoked + organization.created + blocker.opened/resolved + configuration.seeded + bootstrap_admin.provisioned/disabled + recovery_codes.provisioned + employee.imported + organization.promotion_mode.changed + evidence.retrieved (8-3) = 22',
+    // + evidence.retrieved (Story 8-3) + evidence.expired (Story 8-7) = 23
+    'PRD §10.1 (11) + session.revoked + organization.created + blocker.opened/resolved + configuration.seeded + bootstrap_admin.provisioned/disabled + recovery_codes.provisioned + employee.imported + organization.promotion_mode.changed + evidence.retrieved + evidence.expired = 23',
   );
 });
 
